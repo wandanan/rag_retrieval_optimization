@@ -1,0 +1,3 @@
+# 忽略model_cache文件夹及其所有内容
+model_cache/
+.env

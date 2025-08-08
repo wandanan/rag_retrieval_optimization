@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RAG 对比演示（注意力 vs 向量）</title>
+    <link rel="stylesheet" href="/web/styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <h1>RAG 对比演示（注意力RAG vs 向量RAG）</h1>
+
+      <!-- 配置区域 -->
+      <section class="config-section">
+        <div class="config-header">
+          <h2>⚙️ 系统配置</h2>
+          <button id="clearConfigBtn" class="btn-secondary">清除配置</button>
+        </div>
+        <div class="config-grid">
+          <!-- 文档上传 -->
+          <div class="config-card">
+            <h3>📄 文档上传</h3>
+            <form id="uploadForm">
+              <div class="form-group">
+                <label>选择文本文件（.txt）：</label>
+                <input type="file" id="fileInput" accept=".txt" required />
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>父块大小：</label>
+                  <input type="number" id="parent_chunk_size" value="1000" />
+                </div>
+                <div class="form-group">
+                  <label>父块重叠：</label>
+                  <input type="number" id="parent_overlap" value="200" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>子块大小：</label>
+                  <input type="number" id="sub_chunk_size" value="200" />
+                </div>
+                <div class="form-group">
+                  <label>子块重叠：</label>
+                  <input type="number" id="sub_overlap" value="50" />
+                </div>
+              </div>
+              <button type="submit" class="btn-primary">上传并构建索引</button>
+              <div id="uploadStatus" class="status"></div>
+            </form>
+          </div>
+
+          <!-- LLM配置 -->
+          <div class="config-card">
+            <h3>🤖 LLM配置</h3>
+            <div class="form-group">
+              <label>Base URL：</label>
+              <input type="text" id="base_url" placeholder="例如：https://api.openai.com" />
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>模型名：</label>
+                <input type="text" id="model" placeholder="例如：gpt-4o-mini" />
+              </div>
+              <div class="form-group">
+                <label>API Key：</label>
+                <input type="password" id="api_key" placeholder="sk-..." />
+              </div>
+            </div>
+            <div class="form-group">
+              <label>RAG 提示词：</label>
+              <textarea id="prompt" rows="3" placeholder="自定义系统提示词，强调必须严格依据上下文回答"></textarea>
+            </div>
+            <div class="form-group">
+              <label>Top-K 父块：</label>
+              <input type="number" id="top_k_parents" value="4" min="1" max="10" />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 问答区域 -->
+      <section class="qa-section">
+        <div class="qa-header">
+          <h2>💬 实时对比问答</h2>
+          <div class="qa-input-group">
+            <input type="text" id="question" placeholder="请输入你的问题..." />
+            <button id="askBtn" class="btn-primary">同时提问</button>
+          </div>
+        </div>
+
+        <!-- 对比结果 -->
+        <div class="comparison-container">
+          <!-- 注意力RAG -->
+          <div class="rag-panel attention-rag">
+            <div class="panel-header">
+              <h3>🧠 注意力RAG</h3>
+              <div class="status-indicator" id="attnStatus">等待提问</div>
+            </div>
+            <div class="answer-area">
+              <div class="answer-content" id="attnAnswer">请输入问题开始对比...</div>
+            </div>
+            <div class="context-area">
+              <h4>📚 参考上下文</h4>
+              <div class="context-list" id="attnCtx"></div>
+            </div>
+          </div>
+
+          <!-- 向量RAG -->
+          <div class="rag-panel vector-rag">
+            <div class="panel-header">
+              <h3>🔍 向量RAG</h3>
+              <div class="status-indicator" id="vecStatus">等待提问</div>
+            </div>
+            <div class="answer-area">
+              <div class="answer-content" id="vecAnswer">请输入问题开始对比...</div>
+            </div>
+            <div class="context-area">
+              <h4>📚 参考上下文</h4>
+              <div class="context-list" id="vecCtx"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 历史记录 -->
+      <section class="history-section">
+        <div class="history-header">
+          <h3>📝 问答历史</h3>
+          <button id="clearHistoryBtn" class="btn-secondary">清除历史</button>
+        </div>
+        <div class="history-list" id="historyList"></div>
+      </section>
+    </div>
+    <script src="/web/app.js"></script>
+  </body>
+</html> 
