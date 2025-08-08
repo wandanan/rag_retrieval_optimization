@@ -112,11 +112,15 @@ class IndexState:
     def save_index(self, index_key: str):
         """保存索引到磁盘"""
         if not self.index_built or self.vector is None:
+            logger.warning("索引未构建或向量检索器未初始化，无法保存")
             return
         
         try:
+            logger.info(f"开始保存索引: {index_key}")
+            
             # 保存向量索引
             vector_path = os.path.join(VECTOR_DB_DIR, f"{index_key}.faiss")
+            logger.info(f"保存向量索引到: {vector_path}")
             self.vector.save_index(vector_path)
             
             # 保存文档状态
@@ -137,31 +141,49 @@ class IndexState:
             }
             
             state_path = os.path.join(VECTOR_DB_DIR, f"{index_key}.pkl")
+            logger.info(f"保存状态数据到: {state_path}")
             with open(state_path, 'wb') as f:
                 pickle.dump(state_data, f)
             
-            logger.info(f"索引已保存: {index_key}")
+            logger.info(f"索引保存成功: {index_key}")
             
         except Exception as e:
             logger.error(f"保存索引失败: {e}")
+            import traceback
+            logger.error(f"详细错误信息: {traceback.format_exc()}")
     
     def load_index(self, index_key: str) -> bool:
         """从磁盘加载索引"""
         try:
             # 加载向量索引
             vector_path = os.path.join(VECTOR_DB_DIR, f"{index_key}.faiss")
+            logger.info(f"检查向量索引文件: {vector_path}")
             if not os.path.exists(vector_path):
+                logger.info(f"向量索引文件不存在: {vector_path}")
                 return False
             
-            # 确保向量检索器已初始化
-            _ensure_embedder()
-            self.vector.load_index(vector_path)
+            # 检查向量索引的元数据文件
+            vector_meta_path = os.path.join(VECTOR_DB_DIR, f"{index_key}.faiss.meta")
+            logger.info(f"检查向量索引元数据文件: {vector_meta_path}")
+            if not os.path.exists(vector_meta_path):
+                logger.info(f"向量索引元数据文件不存在: {vector_meta_path}")
+                return False
             
             # 加载文档状态
             state_path = os.path.join(VECTOR_DB_DIR, f"{index_key}.pkl")
+            logger.info(f"检查状态文件: {state_path}")
             if not os.path.exists(state_path):
+                logger.info(f"状态文件不存在: {state_path}")
                 return False
             
+            # 确保向量检索器已初始化
+            logger.info("初始化向量检索器...")
+            _ensure_embedder()
+            
+            logger.info("加载向量索引...")
+            self.vector.load_index(vector_path)
+            
+            logger.info("加载文档状态...")
             with open(state_path, 'rb') as f:
                 state_data = pickle.load(f)
             
@@ -182,6 +204,7 @@ class IndexState:
             
             # 预计算父文档token嵌入
             if self.attn:
+                logger.info("预计算父文档token嵌入...")
                 self.attn.precompute_document_semantic_embeddings(self.parent_docs)
             
             logger.info(f"索引已加载: {index_key}")
@@ -189,6 +212,8 @@ class IndexState:
             
         except Exception as e:
             logger.error(f"加载索引失败: {e}")
+            import traceback
+            logger.error(f"详细错误信息: {traceback.format_exc()}")
             return False
 
 state = IndexState()
@@ -307,7 +332,12 @@ async def upload(
     config_hash = state.get_chunk_config_hash()
     index_key = state.get_index_key(text)
     
+    logger.info(f"文档哈希: {doc_hash}")
+    logger.info(f"配置哈希: {config_hash}")
+    logger.info(f"索引键: {index_key}")
+    
     # 检查是否已有缓存的索引
+    logger.info(f"检查缓存索引: {index_key}")
     if state.load_index(index_key):
         logger.info(f"使用缓存的索引: {index_key}")
         return {
@@ -456,7 +486,7 @@ async def query(
         try:
             import requests
             t0 = time.time()
-            url = base_url.rstrip('/') + "/v1/chat/completions"
+            url = base_url
             headers = {
                 "Authorization": f"Bearer {api_key}", 
                 "Content-Type": "application/json",
