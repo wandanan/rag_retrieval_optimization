@@ -1121,3 +1121,86 @@ textarea {
   border-color: #0284c7;
   box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
 } 
+
+/* 当前V3配置显示区域 */
+.current-config-display {
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  border: 1px solid #dee2e6;
+  border-radius: 12px;
+  padding: 20px;
+  margin: 20px 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.current-config-display .config-info h4 {
+  margin: 0 0 15px 0;
+  color: #495057;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.current-config-display .config-info p {
+  margin: 5px 0;
+  color: #6c757d;
+  font-size: 14px;
+}
+
+.current-config-display .config-info p strong {
+  color: #495057;
+  font-weight: 600;
+}
+
+/* 问答内容区域 */
+.qa-content {
+  margin-top: 20px;
+}
+
+.status-row {
+  margin-bottom: 20px;
+}
+
+.result-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.result-card {
+  background: white;
+  border: 1px solid #dee2e6;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.result-card h3 {
+  margin: 0 0 15px 0;
+  color: #495057;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.answer {
+  min-height: 100px;
+  color: #495057;
+  line-height: 1.6;
+}
+
+.contexts {
+  min-height: 100px;
+  color: #495057;
+  line-height: 1.6;
+}
+
+.metrics-row {
+  margin-top: 20px;
+}
+
+.metrics {
+  background: white;
+  border: 1px solid #dee2e6;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+} 

@@ -357,33 +357,43 @@ async def upload(
         
         # 更新V3配置
         if v3_config_data:
+            # 使用现有配置作为基础，只更新传入的配置项
             v3_state.v3_config = ZipperV3Config(
-                encoder_backend=v3_config_data.get("encoder_backend", "hf"),
-                hf_model_name=v3_config_data.get("hf_model_name", "BAAI/bge-small-zh-v1.5"),
-                embedding_dim=int(v3_config_data.get("embedding_dim", 512)),
-                bm25_weight=float(v3_config_data.get("bm25_weight", 1.0)),
-                colbert_weight=float(v3_config_data.get("colbert_weight", 1.5)),
-                num_heads=int(v3_config_data.get("num_heads", 8)),
-                context_influence=float(v3_config_data.get("context_influence", 0.3)),
-                final_top_k=int(v3_config_data.get("final_top_k", 10)),
-                length_penalty_alpha=float(v3_config_data.get("length_penalty_alpha", 0.05)),
-                context_memory_decay=float(v3_config_data.get("context_memory_decay", 0.8)),
-                bm25_top_n=int(v3_config_data.get("bm25_top_n", 100)),
-                encode_batch_size=int(v3_config_data.get("encode_batch_size", 64)),
-                max_length=int(v3_config_data.get("max_length", 256)),
-                use_hybrid_search=bool(v3_config_data.get("use_hybrid_search", True)),
-                use_multi_head=bool(v3_config_data.get("use_multi_head", True)),
-                use_length_penalty=bool(v3_config_data.get("use_length_penalty", True)),
-                use_stateful_reranking=bool(v3_config_data.get("use_stateful_reranking", True)),
-                precompute_doc_tokens=bool(v3_config_data.get("precompute_doc_tokens", False)),
-                enable_amp_if_beneficial=bool(v3_config_data.get("enable_amp_if_beneficial", True)),
-                use_reranker=bool(v3_config_data.get("use_reranker", True)),
-                reranker_model_name=v3_config_data.get("reranker_model_name", "BAAI/bge-reranker-large"),
-                reranker_top_n=int(v3_config_data.get("reranker_top_n", 50)),
-                reranker_weight=float(v3_config_data.get("reranker_weight", 1.5)),
-                reranker_backend=v3_config_data.get("reranker_backend", "auto")
+                encoder_backend=v3_config_data.get("encoder_backend", v3_state.v3_config.encoder_backend),
+                hf_model_name=v3_config_data.get("hf_model_name", v3_state.v3_config.hf_model_name),
+                embedding_dim=int(v3_config_data.get("embedding_dim", v3_state.v3_config.embedding_dim)),
+                bm25_weight=float(v3_config_data.get("bm25_weight", v3_state.v3_config.bm25_weight)),
+                colbert_weight=float(v3_config_data.get("colbert_weight", v3_state.v3_config.colbert_weight)),
+                num_heads=int(v3_config_data.get("num_heads", v3_state.v3_config.num_heads)),
+                context_influence=float(v3_config_data.get("context_influence", v3_state.v3_config.context_influence)),
+                final_top_k=int(v3_config_data.get("final_top_k", v3_state.v3_config.final_top_k)),
+                length_penalty_alpha=float(v3_config_data.get("length_penalty_alpha", v3_state.v3_config.length_penalty_alpha)),
+                context_memory_decay=float(v3_config_data.get("context_memory_decay", v3_state.v3_config.context_memory_decay)),
+                bm25_top_n=int(v3_config_data.get("bm25_top_n", v3_state.v3_config.bm25_top_n)),
+                encode_batch_size=int(v3_config_data.get("encode_batch_size", v3_state.v3_config.encode_batch_size)),
+                max_length=int(v3_config_data.get("max_length", v3_state.v3_config.max_length)),
+                use_hybrid_search=bool(v3_config_data.get("use_hybrid_search", v3_state.v3_config.use_hybrid_search)),
+                use_multi_head=bool(v3_config_data.get("use_multi_head", v3_state.v3_config.use_multi_head)),
+                use_length_penalty=bool(v3_config_data.get("use_length_penalty", v3_state.v3_config.use_length_penalty)),
+                use_stateful_reranking=bool(v3_config_data.get("use_stateful_reranking", v3_state.v3_config.use_stateful_reranking)),
+                precompute_doc_tokens=bool(v3_config_data.get("precompute_doc_tokens", v3_state.v3_config.precompute_doc_tokens)),
+                enable_amp_if_beneficial=bool(v3_config_data.get("enable_amp_if_beneficial", v3_state.v3_config.enable_amp_if_beneficial)),
+                use_reranker=bool(v3_config_data.get("use_reranker", v3_state.v3_config.use_reranker)),
+                reranker_model_name=v3_config_data.get("reranker_model_name", v3_state.v3_config.reranker_model_name),
+                reranker_top_n=int(v3_config_data.get("reranker_top_n", v3_state.v3_config.reranker_top_n)),
+                reranker_weight=float(v3_config_data.get("reranker_weight", v3_state.v3_config.reranker_weight)),
+                reranker_backend=v3_config_data.get("reranker_backend", v3_state.v3_config.reranker_backend),
+                # 保持现有的索引管理配置
+                auto_build_index=v3_state.v3_config.auto_build_index,
+                incremental_update=v3_state.v3_config.incremental_update,
+                warmup_on_first_query=v3_state.v3_config.warmup_on_first_query,
+                index_rebuild_threshold=v3_state.v3_config.index_rebuild_threshold,
+                enable_index_cache=v3_state.v3_config.enable_index_cache,
+                cache_dir=v3_state.v3_config.cache_dir,
+                cache_version=v3_state.v3_config.cache_version
             )
             logger.info(f"V3配置已更新，模型名称: {v3_state.v3_config.hf_model_name}")
+            logger.info(f"V3配置已更新，embedding维度: {v3_state.v3_config.embedding_dim}")
     except Exception as e:
         logger.warning(f"V3配置解析失败，使用默认配置: {e}")
 
@@ -458,58 +468,71 @@ async def v3_query(payload: Dict[str, Any]):
     # 获取V3引擎配置
     v3_config_data = payload.get("v3_config", {})
     
-    # 检查是否需要重新初始化引擎（配置变更）
+    # 检查是否需要重新初始化引擎（只检查关键配置变更）
     current_config_hash = v3_state.get_v3_config_hash()
+    
+    # 使用现有配置作为基础，只更新传入的配置项
     new_config = ZipperV3Config(
-        encoder_backend="hf",  # 强制使用HF
-        hf_model_name=v3_config_data.get("hf_model_name") or "BAAI/bge-small-zh-v1.5",
-        embedding_dim=int(v3_config_data.get("embedding_dim", 512)),
-        bm25_weight=float(v3_config_data.get("bm25_weight", 1.0)),
-        colbert_weight=float(v3_config_data.get("colbert_weight", 1.5)),
-        num_heads=int(v3_config_data.get("num_heads", 8)),
-        context_influence=float(v3_config_data.get("context_influence", 0.3)),
-        final_top_k=int(v3_config_data.get("final_top_k", 10)),
+        encoder_backend=v3_state.v3_config.encoder_backend,
+        hf_model_name=v3_config_data.get("hf_model_name", v3_state.v3_config.hf_model_name),
+        embedding_dim=int(v3_config_data.get("embedding_dim", v3_state.v3_config.embedding_dim)),
+        bm25_weight=float(v3_config_data.get("bm25_weight", v3_state.v3_config.bm25_weight)),
+        colbert_weight=float(v3_config_data.get("colbert_weight", v3_state.v3_config.colbert_weight)),
+        num_heads=int(v3_config_data.get("num_heads", v3_state.v3_config.num_heads)),
+        context_influence=float(v3_config_data.get("context_influence", v3_state.v3_config.context_influence)),
+        final_top_k=int(v3_config_data.get("final_top_k", v3_state.v3_config.final_top_k)),
         # 新增的高级配置项
-        length_penalty_alpha=float(v3_config_data.get("length_penalty_alpha", 0.05)),
-        context_memory_decay=float(v3_config_data.get("context_memory_decay", 0.8)),
-        bm25_top_n=int(v3_config_data.get("bm25_top_n", 100)),
-        encode_batch_size=int(v3_config_data.get("encode_batch_size", 64)),
-        max_length=int(v3_config_data.get("max_length", 256)),
+        length_penalty_alpha=float(v3_config_data.get("length_penalty_alpha", v3_state.v3_config.length_penalty_alpha)),
+        context_memory_decay=float(v3_config_data.get("context_memory_decay", v3_state.v3_config.context_memory_decay)),
+        bm25_top_n=int(v3_config_data.get("bm25_top_n", v3_state.v3_config.bm25_top_n)),
+        encode_batch_size=int(v3_config_data.get("encode_batch_size", v3_state.v3_config.encode_batch_size)),
+        max_length=int(v3_config_data.get("max_length", v3_state.v3_config.max_length)),
         # 功能开关
-        use_hybrid_search=bool(v3_config_data.get("use_hybrid_search", True)),
-        use_multi_head=bool(v3_config_data.get("use_multi_head", True)),
-        use_length_penalty=bool(v3_config_data.get("use_length_penalty", True)),
-        use_stateful_reranking=bool(v3_config_data.get("use_stateful_reranking", True)),
-        precompute_doc_tokens=bool(v3_config_data.get("precompute_doc_tokens", False)),
-        enable_amp_if_beneficial=bool(v3_config_data.get("enable_amp_if_beneficial", True)),
+        use_hybrid_search=bool(v3_config_data.get("use_hybrid_search", v3_state.v3_config.use_hybrid_search)),
+        use_multi_head=bool(v3_config_data.get("use_multi_head", v3_state.v3_config.use_multi_head)),
+        use_length_penalty=bool(v3_config_data.get("use_length_penalty", v3_state.v3_config.use_length_penalty)),
+        use_stateful_reranking=bool(v3_config_data.get("use_stateful_reranking", v3_state.v3_config.use_stateful_reranking)),
+        precompute_doc_tokens=bool(v3_config_data.get("precompute_doc_tokens", v3_state.v3_config.precompute_doc_tokens)),
+        enable_amp_if_beneficial=bool(v3_config_data.get("enable_amp_if_beneficial", v3_state.v3_config.enable_amp_if_beneficial)),
         # 新增重排序配置
-        use_reranker=bool(v3_config_data.get("use_reranker", True)),
-        reranker_model_name=v3_config_data.get("reranker_model_name", "BAAI/bge-reranker-large"),
-        reranker_top_n=int(v3_config_data.get("reranker_top_n", 50)),
-        reranker_weight=float(v3_config_data.get("reranker_weight", 1.5)),
-        reranker_backend=v3_config_data.get("reranker_backend", "auto")
+        use_reranker=bool(v3_config_data.get("use_reranker", v3_state.v3_config.use_reranker)),
+        reranker_model_name=v3_config_data.get("reranker_model_name", v3_state.v3_config.reranker_model_name),
+        reranker_top_n=int(v3_config_data.get("reranker_top_n", v3_state.v3_config.reranker_top_n)),
+        reranker_weight=float(v3_config_data.get("reranker_weight", v3_state.v3_config.reranker_weight)),
+        reranker_backend=v3_config_data.get("reranker_backend", v3_state.v3_config.reranker_backend),
+        # 新增的索引管理配置
+        auto_build_index=v3_state.v3_config.auto_build_index,
+        incremental_update=v3_state.v3_config.incremental_update,
+        warmup_on_first_query=v3_state.v3_config.warmup_on_first_query,
+        index_rebuild_threshold=v3_state.v3_config.index_rebuild_threshold,
+        # 缓存配置
+        enable_index_cache=v3_state.v3_config.enable_index_cache,
+        cache_dir=v3_state.v3_config.cache_dir,
+        cache_version=v3_state.v3_config.cache_version
     )
     
-    new_config_hash = hashlib.md5(
-        f"{new_config.encoder_backend}_{new_config.hf_model_name}_"
-        f"{new_config.embedding_dim}_{new_config.bm25_weight}_{new_config.colbert_weight}_{new_config.num_heads}_"
-        f"{new_config.context_influence}_{new_config.final_top_k}_"
-        f"{new_config.length_penalty_alpha}_{new_config.context_memory_decay}_"
-        f"{new_config.bm25_top_n}_{new_config.encode_batch_size}_{new_config.max_length}_"
-        f"{new_config.use_hybrid_search}_{new_config.use_multi_head}_"
-        f"{new_config.use_length_penalty}_{new_config.use_stateful_reranking}_"
-        f"{new_config.precompute_doc_tokens}_{new_config.enable_amp_if_beneficial}_"
-        f"{new_config.use_reranker}_{new_config.reranker_model_name}_{new_config.reranker_top_n}_{new_config.reranker_weight}_{new_config.reranker_backend}".encode()
-    ).hexdigest()
+    # 只检查关键配置变更（模型名称和维度），避免因为权重等参数变化导致的重新初始化
+    critical_config_changed = (
+        new_config.hf_model_name != v3_state.v3_config.hf_model_name or
+        new_config.embedding_dim != v3_state.v3_config.embedding_dim or
+        new_config.encoder_backend != v3_state.v3_config.encoder_backend
+    )
     
-    # 如果配置变更，重新初始化引擎
-    if current_config_hash != new_config_hash:
-        logger.info("V3引擎配置变更，重新初始化...")
+    # 如果关键配置变更，重新初始化引擎
+    if critical_config_changed:
+        logger.info("V3引擎关键配置变更，重新初始化...")
+        logger.info(f"模型变更: {v3_state.v3_config.hf_model_name} -> {new_config.hf_model_name}")
+        logger.info(f"维度变更: {v3_state.v3_config.embedding_dim} -> {new_config.embedding_dim}")
+        
         v3_state.v3_config = new_config
         v3_state.v3_engine = AdvancedZipperQueryEngineV3(new_config)
         v3_state.v3_engine.build_document_index(v3_state.documents)
         # 清空会话状态
         v3_state.session_states.clear()
+    else:
+        # 只更新非关键配置，不重新初始化引擎
+        logger.info("V3引擎关键配置未变更，仅更新参数配置")
+        v3_state.v3_config = new_config
     
     # 获取或创建会话状态
     session_id = payload.get("session_id", "default")

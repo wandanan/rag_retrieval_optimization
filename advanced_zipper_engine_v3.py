@@ -543,6 +543,7 @@ class AdvancedZipperQueryEngineV3:
         self.doc_token_embeddings: Dict[int, torch.Tensor] = {}
         self.bm25_index: Optional[BM25Okapi] = None
         self.bm25_idx_to_pid: Dict[int, int] = {}
+        self.pid_to_bm25_idx: Dict[int, int] = {}  # 新增：反向映射，提高查找效率
         self.index_built: bool = False  # 新增：索引构建状态标志
         
         # --- 新增: 索引缓存管理器 ---
@@ -663,6 +664,7 @@ class AdvancedZipperQueryEngineV3:
         tokenized_corpus = [self.encoder.tokenize(doc) for doc in corpus_list]
         self.bm25_index = BM25Okapi(tokenized_corpus)
         self.bm25_idx_to_pid = {i: pid for i, pid in enumerate(doc_ids_sorted)}
+        self.pid_to_bm25_idx = {pid: i for i, pid in enumerate(doc_ids_sorted)}  # 构建反向映射
         
         # 更新token embeddings（仅处理新增和修改的文档）
         pids_to_update = added_pids | modified_pids
@@ -683,6 +685,7 @@ class AdvancedZipperQueryEngineV3:
         tokenized_corpus = [self.encoder.tokenize(doc) for doc in corpus_list]
         self.bm25_index = BM25Okapi(tokenized_corpus)
         self.bm25_idx_to_pid = {i: pid for i, pid in enumerate(doc_ids_sorted)}
+        self.pid_to_bm25_idx = {pid: i for i, pid in enumerate(doc_ids_sorted)}  # 构建反向映射
         
         logger.info("构建Token级稠密索引...")
         self.doc_token_embeddings = {}
@@ -715,6 +718,7 @@ class AdvancedZipperQueryEngineV3:
         self.doc_token_embeddings = cached_index['doc_token_embeddings']
         self.bm25_index = cached_index['bm25_index']
         self.bm25_idx_to_pid = cached_index['bm25_idx_to_pid']
+        self.pid_to_bm25_idx = cached_index.get('pid_to_bm25_idx', {})  # 兼容旧版本缓存
         self.index_built = True
     
     def _save_index_to_cache(self):
@@ -726,7 +730,8 @@ class AdvancedZipperQueryEngineV3:
                 'documents': self.documents,
                 'doc_token_embeddings': self.doc_token_embeddings,
                 'bm25_index': self.bm25_index,
-                'bm25_idx_to_pid': self.bm25_idx_to_pid
+                'bm25_idx_to_pid': self.bm25_idx_to_pid,
+                'pid_to_bm25_idx': self.pid_to_bm25_idx  # 保存反向映射
             }
             self.cache_manager.save_index(cache_key, index_data)
         except Exception as e:
@@ -829,7 +834,14 @@ class AdvancedZipperQueryEngineV3:
         colbert_min, colbert_max = (colbert_vals.min(), colbert_vals.max()) if colbert_vals.size > 1 else (0, 1)
         
         for pid in candidate_pids:
-            norm_bm25 = (bm25_raw_scores[self.bm25_idx_to_pid.index(pid)] - bm25_min) / (bm25_max - bm25_min + 1e-9)
+            # 使用反向映射快速找到对应的BM25索引位置
+            bm25_idx = self.pid_to_bm25_idx.get(pid)
+            
+            if bm25_idx is not None:
+                norm_bm25 = (bm25_raw_scores[bm25_idx] - bm25_min) / (bm25_max - bm25_min + 1e-9)
+            else:
+                norm_bm25 = 0.0  # 如果找不到对应的索引，使用默认分数
+                
             norm_colbert = (colbert_scores_map.get(pid, 0) - colbert_min) / (colbert_max - colbert_min + 1e-9)
             
             if self.config.use_hybrid_search:
@@ -933,6 +945,7 @@ class AdvancedZipperQueryEngineV3:
         self.doc_token_embeddings.clear()
         self.bm25_index = None
         self.bm25_idx_to_pid.clear()
+        self.pid_to_bm25_idx.clear()
         self.index_built = False
         self.documents_hash = ""
         self.query_count = 0

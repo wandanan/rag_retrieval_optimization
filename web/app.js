@@ -2,6 +2,7 @@
 let isIndexBuilt = false;
 let history = [];
 let modelStatus = 'online'; // 新增：模型状态管理
+let currentV3Config = null; // 新增：保存当前使用的V3配置
 
 // 配置项列表
 const CONFIG_KEYS = {
@@ -128,6 +129,51 @@ const batchTestElements = {
   resultsList: document.getElementById('resultsList'),
   refreshResultsBtn: document.getElementById('refreshResultsBtn')
 };
+
+// 显示当前V3配置信息
+function showCurrentV3Config() {
+  if (!currentV3Config) {
+    console.log('当前没有保存的V3配置');
+    return;
+  }
+  
+  console.log('=== 当前V3引擎配置 ===');
+  console.log('编码后端:', currentV3Config.encoder_backend);
+  console.log('HF模型名称:', currentV3Config.hf_model_name);
+  console.log('嵌入维度:', currentV3Config.embedding_dim);
+  console.log('BM25权重:', currentV3Config.bm25_weight);
+  console.log('ColBERT权重:', currentV3Config.colbert_weight);
+  console.log('注意力头数:', currentV3Config.num_heads);
+  console.log('上下文影响:', currentV3Config.context_influence);
+  console.log('重排序模型:', currentV3Config.reranker_model_name);
+  console.log('重排序权重:', currentV3Config.reranker_weight);
+  console.log('========================');
+}
+
+function validateV3ConfigConsistency() {
+  if (!currentV3Config) {
+    return { consistent: false, message: '未找到保存的V3配置' };
+  }
+  
+  // 检查关键配置项是否完整
+  const requiredFields = ['hf_model_name', 'embedding_dim', 'encoder_backend'];
+  for (const field of requiredFields) {
+    if (!currentV3Config[field]) {
+      return { consistent: false, message: `缺少关键配置项: ${field}` };
+    }
+  }
+  
+  // 检查配置值的合理性
+  if (currentV3Config.embedding_dim < 128 || currentV3Config.embedding_dim > 1024) {
+    return { consistent: false, message: `嵌入维度值不合理: ${currentV3Config.embedding_dim}` };
+  }
+  
+  if (!currentV3Config.hf_model_name.includes('/')) {
+    return { consistent: false, message: `模型名称格式不正确: ${currentV3Config.hf_model_name}` };
+  }
+  
+  return { consistent: true, message: 'V3配置验证通过' };
+}
 
 // 配置管理
 function saveConfig() {
@@ -377,6 +423,47 @@ async function uploadFile(e) {
   const precompute_doc_tokens = document.getElementById('precompute_doc_tokens').checked;
   const enable_amp_if_beneficial = document.getElementById('enable_amp_if_beneficial').checked;
 
+  // 构建V3配置
+  const v3Config = {
+    encoder_backend,
+    hf_model_name,
+    embedding_dim,
+    bm25_weight,
+    colbert_weight,
+    num_heads,
+    context_influence,
+    length_penalty_alpha,
+    context_memory_decay,
+    bm25_top_n,
+    final_top_k,
+    encode_batch_size,
+    max_length,
+    use_reranker,
+    reranker_model_name,
+    reranker_top_n,
+    reranker_weight,
+    reranker_backend,
+    use_hybrid_search,
+    use_multi_head,
+    use_length_penalty,
+    use_stateful_reranking,
+    precompute_doc_tokens,
+    enable_amp_if_beneficial
+  };
+
+  // 保存当前V3配置，供查询时使用
+  currentV3Config = { ...v3Config };
+  
+  // 显示上传配置信息
+  console.log('上传文档使用的V3配置:', currentV3Config);
+  console.log('配置已保存，查询时将使用完全一致的配置');
+  
+  // 显示当前配置到界面
+  showCurrentV3Config();
+  
+  // 在界面上显示当前使用的配置
+  showOptimizationTip(`已保存V3配置：模型=${currentV3Config.hf_model_name}, 维度=${currentV3Config.embedding_dim}`, 'success');
+
   const formData = new FormData();
   formData.append('file', elements.fileInput.files[0]);
   formData.append('parent_chunk_size', document.getElementById('parent_chunk_size').value || '1000');
@@ -385,7 +472,7 @@ async function uploadFile(e) {
   formData.append('sub_overlap', document.getElementById('sub_overlap').value || '50');
   
   // 添加V3引擎配置
-  const v3Config = {
+  const v3ConfigToSend = {
     encoder_backend,
     hf_model_name,
     embedding_dim,
@@ -413,10 +500,10 @@ async function uploadFile(e) {
   };
   
   // 调试：显示配置信息
-  console.log('上传前的V3配置:', v3Config);
+  console.log('上传前的V3配置:', v3ConfigToSend);
   console.log('HF模型名称:', hf_model_name);
   
-  formData.append('v3_config', JSON.stringify(v3Config));
+  formData.append('v3_config', JSON.stringify(v3ConfigToSend));
 
   elements.uploadStatus.textContent = '上传中...';
   elements.uploadStatus.className = 'status';
@@ -503,42 +590,27 @@ async function askQuestion() {
     return;
   }
 
-  // 获取V3引擎配置
-  const encoder_backend = document.getElementById('encoder_backend').value;
-  const hf_model_name = document.getElementById('hf_model_name').value;
-  const embedding_dim = Number(document.getElementById('embedding_dim').value);
-  const bm25_weight = Number(document.getElementById('bm25_weight').value);
-  const colbert_weight = Number(document.getElementById('colbert_weight').value);
-  const num_heads = Number(document.getElementById('num_heads').value);
-  const context_influence = Number(document.getElementById('context_influence').value);
-  const length_penalty_alpha = Number(document.getElementById('length_penalty_alpha').value);
-  const context_memory_decay = Number(document.getElementById('context_memory_decay').value);
-  const bm25_top_n = Number(document.getElementById('bm25_top_n').value);
-  const final_top_k = Number(document.getElementById('final_top_k').value);
-  const encode_batch_size = Number(document.getElementById('encode_batch_size').value);
-  const max_length = Number(document.getElementById('max_length').value);
+  // 检查是否有保存的V3配置
+  if (!currentV3Config) {
+    alert('未找到V3配置信息，请重新上传文档');
+    return;
+  }
   
-  // 获取重排序配置
-  const use_reranker = document.getElementById('use_reranker').checked;
-  const reranker_model_name = document.getElementById('reranker_model_name').value;
-  const reranker_top_n = Number(document.getElementById('reranker_top_n').value);
-  const reranker_weight = Number(document.getElementById('reranker_weight').value);
-  const reranker_backend = document.getElementById('reranker_backend').value;
+  // 验证V3配置一致性
+  const configValidation = validateV3ConfigConsistency();
+  if (!configValidation.consistent) {
+    alert(`V3配置验证失败: ${configValidation.message}\n请重新上传文档以获取正确的配置`);
+    return;
+  }
+
+  // 使用保存的V3配置，确保与上传文档时完全一致
+  const v3Config = { ...currentV3Config };
   
-  // 获取功能开关配置
-  const use_hybrid_search = document.getElementById('use_hybrid_search').checked;
-  const use_multi_head = document.getElementById('use_multi_head').checked;
-  const use_length_penalty = document.getElementById('use_length_penalty').checked;
-  const use_stateful_reranking = document.getElementById('use_stateful_reranking').checked;
-  const precompute_doc_tokens = document.getElementById('precompute_doc_tokens').checked;
-  const enable_amp_if_beneficial = document.getElementById('enable_amp_if_beneficial').checked;
-  
-  // 获取LLM配置
-  const base_url = document.getElementById('base_url').value.trim();
-  const model = document.getElementById('model').value.trim();
-  const api_key = document.getElementById('api_key').value.trim();
-  const prompt = document.getElementById('prompt').value.trim();
-  const top_k_parents = 4; // 使用固定值，因为HTML中没有这个元素
+  // 显示使用的配置信息
+  console.log('查询时使用的V3配置:', v3Config);
+  console.log('模型名称:', v3Config.hf_model_name);
+  console.log('嵌入维度:', v3Config.embedding_dim);
+  console.log('确保配置与上传文档时一致，避免重新初始化');
 
   // 设置加载状态
   setLoading(true);
@@ -554,42 +626,22 @@ async function askQuestion() {
 
   // 根据编码后端选择性地设置模型配置
   const modelConfig = {};
-  if (encoder_backend === 'hf') {
-    modelConfig.hf_model_name = hf_model_name;
+  if (v3Config.encoder_backend === 'hf') {
+    modelConfig.hf_model_name = v3Config.hf_model_name;
   }
 
   const payload = {
     question,
-    top_k_parents,
-    top_k_sub: Math.max(50, top_k_parents * 20),
-    prompt,
-    llm: { base_url, model, api_key, temperature: 0.2 },
-    v3_config: {
-      encoder_backend,
-      ...modelConfig,
-      embedding_dim,
-      bm25_weight,
-      colbert_weight,
-      num_heads,
-      context_influence,
-      length_penalty_alpha,
-      context_memory_decay,
-      bm25_top_n,
-      final_top_k,
-      encode_batch_size,
-      max_length,
-      use_reranker,
-      reranker_model_name,
-      reranker_top_n,
-      reranker_weight,
-      reranker_backend,
-      use_hybrid_search,
-      use_multi_head,
-      use_length_penalty,
-      use_stateful_reranking,
-      precompute_doc_tokens,
-      enable_amp_if_beneficial
-    }
+    top_k_parents: 4, // 使用固定值，因为HTML中没有这个元素
+    top_k_sub: Math.max(50, 4 * 20),
+    prompt: document.getElementById('prompt').value.trim(),
+    llm: { 
+      base_url: document.getElementById('base_url').value.trim(), 
+      model: document.getElementById('model').value.trim(), 
+      api_key: document.getElementById('api_key').value.trim(), 
+      temperature: 0.2 
+    },
+    v3_config: v3Config  // 使用完全一致的配置
   };
 
   try {

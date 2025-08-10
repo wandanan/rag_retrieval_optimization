@@ -298,24 +298,34 @@
           </div>
         </div>
 
-        <!-- V3引擎结果 -->
-        <div class="v3-result-container">
-          <div class="v3-panel">
-            <div class="panel-header">
-              <h3>🚀 V3引擎结果</h3>
-              <div class="status-indicator" id="v3Status">等待提问</div>
+        <!-- 当前V3配置显示区域 -->
+        <div id="current-v3-config" class="current-config-display">
+          <div class="config-info">
+            <h4>📋 当前V3配置:</h4>
+            <p><em>请先上传文档以查看配置信息</em></p>
+          </div>
+        </div>
+
+        <!-- 问答状态和结果 -->
+        <div class="qa-content">
+          <div class="status-row">
+            <div id="v3Status" class="status">等待查询...</div>
+          </div>
+          
+          <div class="result-grid">
+            <div class="result-card">
+              <h3>🎯 V3检索结果</h3>
+              <div id="v3Answer" class="answer"></div>
             </div>
-            <div class="answer-area">
-              <div class="answer-content" id="v3Answer">请输入问题开始测试...</div>
+            
+            <div class="result-card">
+              <h3>📚 检索上下文</h3>
+              <div id="v3Ctx" class="contexts"></div>
             </div>
-            <div class="context-area">
-              <h4>📚 检索结果</h4>
-              <div class="context-list" id="v3Ctx"></div>
-            </div>
-            <div class="metrics-area">
-              <h4>📊 检索指标</h4>
-              <div class="metrics-grid" id="v3Metrics"></div>
-            </div>
+          </div>
+          
+          <div class="metrics-row">
+            <div id="v3Metrics" class="metrics"></div>
           </div>
         </div>
       </section>
