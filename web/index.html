@@ -176,6 +176,53 @@
               </div>
             </div>
             
+            <!-- 新增: 重排序配置 -->
+            <div class="reranker-config">
+              <h4>🚀 交叉编码器重排序</h4>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>
+                    <input type="checkbox" id="use_reranker" checked />
+                    启用交叉编码器重排序
+                  </label>
+                </div>
+                <div class="form-group">
+                  <label>
+                    <input type="checkbox" id="enable_amp_if_beneficial" checked />
+                    启用AMP优化
+                  </label>
+                </div>
+              </div>
+              
+              <!-- 重排序详细配置 -->
+              <div class="form-row">
+                <div class="form-group">
+                  <label>重排序模型：</label>
+                  <input type="text" id="reranker_model_name" value="BAAI/bge-reranker-large" placeholder="重排序模型名称" />
+                </div>
+                <div class="form-group">
+                  <label>重排序候选数量：</label>
+                  <input type="number" id="reranker_top_n" value="50" min="10" max="200" />
+                </div>
+              </div>
+              
+              <div class="form-row">
+                <div class="form-group">
+                  <label>重排序权重：</label>
+                  <input type="number" id="reranker_weight" value="1.5" step="0.1" min="0" max="5" />
+                </div>
+                <div class="form-group">
+                  <label>重排序后端：</label>
+                  <select id="reranker_backend">
+                    <option value="auto">自动选择 (推荐)</option>
+                    <option value="flagembedding">FlagEmbedding</option>
+                    <option value="transformers">HuggingFace Transformers</option>
+                    <option value="onnx">ONNX Runtime</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            
             <div class="form-row">
               <div class="form-group">
                 <label>

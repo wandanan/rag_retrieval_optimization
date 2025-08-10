@@ -1009,4 +1009,58 @@ textarea {
 .result-option input[type="checkbox"]:checked + small {
   color: var(--success);
   font-weight: 500;
+}
+
+/* 重排序配置特殊样式 */
+.reranker-config {
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border: 2px solid #0ea5e9;
+  border-radius: 10px;
+  padding: 20px;
+  margin: 15px 0;
+  position: relative;
+}
+
+.reranker-config::before {
+  content: "🚀";
+  position: absolute;
+  top: -10px;
+  left: 20px;
+  background: #0ea5e9;
+  color: white;
+  padding: 5px 10px;
+  border-radius: 15px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.reranker-config h4 {
+  color: #0ea5e9;
+  margin-bottom: 15px;
+  font-size: 1.2rem;
+}
+
+.reranker-config .form-row {
+  margin-bottom: 10px;
+}
+
+.reranker-config .form-group {
+  margin-bottom: 12px;
+}
+
+.reranker-config input[type="checkbox"]:checked + label {
+  color: #0ea5e9;
+  font-weight: 600;
+}
+
+.reranker-config input[type="text"],
+.reranker-config input[type="number"] {
+  border-color: #0ea5e9;
+  background: rgba(14, 165, 233, 0.05);
+}
+
+.reranker-config input[type="text"]:focus,
+.reranker-config input[type="number"]:focus {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
 } 

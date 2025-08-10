@@ -28,7 +28,13 @@ V3_ENGINE_PRESETS = {
             "use_hybrid_search": True,
             "use_multi_head": True,
             "use_length_penalty": True,
-            "use_stateful_reranking": True
+            "use_stateful_reranking": True,
+            # 新增重排序配置
+            "use_reranker": True,
+            "reranker_model_name": "BAAI/bge-reranker-large",
+            "reranker_top_n": 50,
+            "reranker_weight": 1.5,
+            "reranker_backend": "auto"  # 新增：重排序后端选择
         }
     ),
     
@@ -40,14 +46,20 @@ V3_ENGINE_PRESETS = {
             "bge_model_path": "models--BAAI--bge-small-zh-v1.5/snapshots/7999e1d3359715c523056ef9478215996d62a620",
             "hf_model_name": None,
             "bm25_weight": 0.5,
-            "colbert_weight": 2.0,
+            "colbert_weight": 2.9,
             "num_heads": 8,
             "context_influence": 0.4,
             "final_top_k": 15,
             "use_hybrid_search": True,
             "use_multi_head": True,
             "use_length_penalty": True,
-            "use_stateful_reranking": True
+            "use_stateful_reranking": True,
+            # 新增重排序配置
+            "use_reranker": True,
+            "reranker_model_name": "BAAI/bge-reranker-large",
+            "reranker_top_n": 100,
+            "reranker_weight": 2.0,
+            "reranker_backend": "auto"  # 新增：重排序后端选择
         }
     ),
     
@@ -66,7 +78,13 @@ V3_ENGINE_PRESETS = {
             "use_hybrid_search": True,
             "use_multi_head": False,
             "use_length_penalty": False,
-            "use_stateful_reranking": False
+            "use_stateful_reranking": False,
+            # 新增重排序配置
+            "use_reranker": False,
+            "reranker_model_name": "BAAI/bge-reranker-large",
+            "reranker_top_n": 30,
+            "reranker_weight": 1.0,
+            "reranker_backend": "auto"  # 新增：重排序后端选择
         }
     ),
     
@@ -85,7 +103,13 @@ V3_ENGINE_PRESETS = {
             "use_hybrid_search": True,
             "use_multi_head": True,
             "use_length_penalty": True,
-            "use_stateful_reranking": True
+            "use_stateful_reranking": True,
+            # 新增重排序配置
+            "use_reranker": True,
+            "reranker_model_name": "BAAI/bge-reranker-large",
+            "reranker_top_n": 80,
+            "reranker_weight": 1.8,
+            "reranker_backend": "auto"  # 新增：重排序后端选择
         }
     ),
     
@@ -104,7 +128,8 @@ V3_ENGINE_PRESETS = {
             "use_hybrid_search": True,
             "use_multi_head": True,
             "use_length_penalty": True,
-            "use_stateful_reranking": True
+            "use_stateful_reranking": True,
+            "reranker_backend": "auto"  # 新增：重排序后端选择
         }
     )
 }
@@ -124,7 +149,8 @@ DEFAULT_V3_CONFIG = {
     "use_length_penalty": True,
     "use_stateful_reranking": True,
     "precompute_doc_tokens": False,
-    "enable_amp_if_beneficial": True
+    "enable_amp_if_beneficial": True,
+    "reranker_backend": "auto"  # 新增：重排序后端选择
 }
 
 # 配置验证规则
@@ -159,7 +185,7 @@ CONFIG_VALIDATION_RULES = {
     "num_heads": {
         "type": int,
         "min": 1,
-        "max": 16,
+        "max": 8,
         "description": "多头数量，范围1-16"
     },
     "context_influence": {

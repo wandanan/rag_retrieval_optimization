@@ -431,7 +431,13 @@ async def v3_query(payload: Dict[str, Any]):
         use_length_penalty=bool(v3_config_data.get("use_length_penalty", True)),
         use_stateful_reranking=bool(v3_config_data.get("use_stateful_reranking", True)),
         precompute_doc_tokens=bool(v3_config_data.get("precompute_doc_tokens", False)),
-        enable_amp_if_beneficial=bool(v3_config_data.get("enable_amp_if_beneficial", True))
+        enable_amp_if_beneficial=bool(v3_config_data.get("enable_amp_if_beneficial", True)),
+        # 新增重排序配置
+        use_reranker=bool(v3_config_data.get("use_reranker", True)),
+        reranker_model_name=v3_config_data.get("reranker_model_name", "BAAI/bge-reranker-large"),
+        reranker_top_n=int(v3_config_data.get("reranker_top_n", 50)),
+        reranker_weight=float(v3_config_data.get("reranker_weight", 1.5)),
+        reranker_backend=v3_config_data.get("reranker_backend", "auto")
     )
     
     new_config_hash = hashlib.md5(
@@ -442,7 +448,8 @@ async def v3_query(payload: Dict[str, Any]):
         f"{new_config.bm25_top_n}_{new_config.encode_batch_size}_{new_config.max_length}_"
         f"{new_config.use_hybrid_search}_{new_config.use_multi_head}_"
         f"{new_config.use_length_penalty}_{new_config.use_stateful_reranking}_"
-        f"{new_config.precompute_doc_tokens}_{new_config.enable_amp_if_beneficial}".encode()
+        f"{new_config.precompute_doc_tokens}_{new_config.enable_amp_if_beneficial}_"
+        f"{new_config.use_reranker}_{new_config.reranker_model_name}_{new_config.reranker_top_n}_{new_config.reranker_weight}_{new_config.reranker_backend}".encode()
     ).hexdigest()
     
     # 如果配置变更，重新初始化引擎
@@ -492,7 +499,12 @@ async def v3_query(payload: Dict[str, Any]):
                 "encode_batch_size": v3_state.v3_config.encode_batch_size,
                 "max_length": v3_state.v3_config.max_length,
                 "precompute_doc_tokens": v3_state.v3_config.precompute_doc_tokens,
-                "enable_amp_if_beneficial": v3_state.v3_config.enable_amp_if_beneficial
+                "enable_amp_if_beneficial": v3_state.v3_config.enable_amp_if_beneficial,
+                "use_reranker": v3_state.v3_config.use_reranker,
+                "reranker_model_name": v3_state.v3_config.reranker_model_name,
+                "reranker_top_n": v3_state.v3_config.reranker_top_n,
+                "reranker_weight": v3_state.v3_config.reranker_weight,
+                "reranker_backend": v3_state.v3_config.reranker_backend
             }
         }
         

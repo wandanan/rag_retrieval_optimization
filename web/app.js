@@ -93,7 +93,9 @@ function saveConfig() {
     'length_penalty_alpha', 'context_memory_decay', 'bm25_top_n', 'final_top_k',
     'encode_batch_size', 'max_length', 'use_hybrid_search', 'use_multi_head',
     'use_length_penalty', 'use_stateful_reranking', 'precompute_doc_tokens',
-    'enable_amp_if_beneficial', 'include_contexts'
+    'enable_amp_if_beneficial', 'include_contexts',
+    // 新增重排序配置
+    'use_reranker', 'reranker_model_name', 'reranker_top_n', 'reranker_weight', 'reranker_backend'
   ];
   
   v3ConfigElements.forEach(elementId => {
@@ -348,7 +350,22 @@ async function askQuestion() {
   const final_top_k = Number(document.getElementById('final_top_k').value);
   const encode_batch_size = Number(document.getElementById('encode_batch_size').value);
   const max_length = Number(document.getElementById('max_length').value);
-
+  
+  // 获取重排序配置
+  const use_reranker = document.getElementById('use_reranker').checked;
+  const reranker_model_name = document.getElementById('reranker_model_name').value;
+  const reranker_top_n = Number(document.getElementById('reranker_top_n').value);
+  const reranker_weight = Number(document.getElementById('reranker_weight').value);
+  const reranker_backend = document.getElementById('reranker_backend').value;
+  
+  // 获取功能开关配置
+  const use_hybrid_search = document.getElementById('use_hybrid_search').checked;
+  const use_multi_head = document.getElementById('use_multi_head').checked;
+  const use_length_penalty = document.getElementById('use_length_penalty').checked;
+  const use_stateful_reranking = document.getElementById('use_stateful_reranking').checked;
+  const precompute_doc_tokens = document.getElementById('precompute_doc_tokens').checked;
+  const enable_amp_if_beneficial = document.getElementById('enable_amp_if_beneficial').checked;
+  
   // 获取LLM配置
   const base_url = document.getElementById('base_url').value.trim();
   const model = document.getElementById('model').value.trim();
@@ -384,7 +401,18 @@ async function askQuestion() {
       bm25_top_n,
       final_top_k,
       encode_batch_size,
-      max_length
+      max_length,
+      use_reranker,
+      reranker_model_name,
+      reranker_top_n,
+      reranker_weight,
+      reranker_backend,
+      use_hybrid_search,
+      use_multi_head,
+      use_length_penalty,
+      use_stateful_reranking,
+      precompute_doc_tokens,
+      enable_amp_if_beneficial
     }
   };
 
@@ -421,8 +449,24 @@ async function askQuestion() {
           <span class="metric-value">${data.metrics.total_time?.toFixed(3) || 'N/A'}s</span>
         </div>
         <div class="metric-item">
-          <span class="metric-label">上下文数量:</span>
-          <span class="metric-value">${data.contexts?.length || 0}</span>
+          <span class="metric-label">候选数量:</span>
+          <span class="metric-value">${data.metrics.num_candidates || 'N/A'}</span>
+        </div>
+        <div class="metric-item">
+          <span class="metric-label">最高分数:</span>
+          <span class="metric-value">${data.metrics.top_score?.toFixed(3) || 'N/A'}</span>
+        </div>
+        <div class="metric-item">
+          <span class="metric-label">重排序状态:</span>
+          <span class="metric-value">${data.metrics.engine_config?.use_reranker ? '启用' : '禁用'}</span>
+        </div>
+        <div class="metric-item">
+          <span class="metric-label">重排序模型:</span>
+          <span class="metric-value">${data.metrics.engine_config?.reranker_model_name || 'N/A'}</span>
+        </div>
+        <div class="metric-item">
+          <span class="metric-label">重排序后端:</span>
+          <span class="metric-value">${data.metrics.engine_config?.reranker_backend || 'N/A'}</span>
         </div>
       `;
     }
@@ -513,7 +557,13 @@ function applyPreset() {
       bm25_top_n: 100,
       final_top_k: 10,
       encode_batch_size: 64,
-      max_length: 256
+      max_length: 256,
+      // 新增重排序配置
+      use_reranker: true,
+      reranker_model_name: "BAAI/bge-reranker-large",
+      reranker_top_n: 50,
+      reranker_weight: 1.5,
+      reranker_backend: "auto"
     },
     precision: {
       bm25_weight: 0.8,
@@ -525,7 +575,13 @@ function applyPreset() {
       bm25_top_n: 150,
       final_top_k: 15,
       encode_batch_size: 32,
-      max_length: 384
+      max_length: 384,
+      // 新增重排序配置
+      use_reranker: true,
+      reranker_model_name: "BAAI/bge-reranker-large",
+      reranker_top_n: 100,
+      reranker_weight: 2.0,
+      reranker_backend: "auto"
     },
     speed: {
       bm25_weight: 1.2,
@@ -537,7 +593,13 @@ function applyPreset() {
       bm25_top_n: 50,
       final_top_k: 5,
       encode_batch_size: 128,
-      max_length: 192
+      max_length: 192,
+      // 新增重排序配置
+      use_reranker: false,
+      reranker_model_name: "BAAI/bge-reranker-large",
+      reranker_top_n: 30,
+      reranker_weight: 1.0,
+      reranker_backend: "auto"
     },
     conversational: {
       bm25_weight: 0.9,
@@ -549,7 +611,13 @@ function applyPreset() {
       bm25_top_n: 120,
       final_top_k: 12,
       encode_batch_size: 48,
-      max_length: 320
+      max_length: 320,
+      // 新增重排序配置
+      use_reranker: true,
+      reranker_model_name: "BAAI/bge-reranker-large",
+      reranker_top_n: 80,
+      reranker_weight: 1.8,
+      reranker_backend: "auto"
     },
     hf_optimized: {
       bm25_weight: 1.1,
@@ -561,7 +629,13 @@ function applyPreset() {
       bm25_top_n: 80,
       final_top_k: 8,
       encode_batch_size: 96,
-      max_length: 256
+      max_length: 256,
+      // 新增重排序配置
+      use_reranker: true,
+      reranker_model_name: "BAAI/bge-reranker-large",
+      reranker_top_n: 60,
+      reranker_weight: 1.6,
+      reranker_backend: "auto"
     }
   };
   
@@ -570,7 +644,11 @@ function applyPreset() {
     Object.keys(preset).forEach(key => {
       const element = document.getElementById(key);
       if (element) {
-        element.value = preset[key];
+        if (element.type === 'checkbox') {
+          element.checked = preset[key];
+        } else {
+          element.value = preset[key];
+        }
       }
     });
     
@@ -603,7 +681,9 @@ function validateAndShowConfig() {
     'length_penalty_alpha', 'context_memory_decay', 'bm25_top_n', 'final_top_k',
     'encode_batch_size', 'max_length', 'use_hybrid_search', 'use_multi_head',
     'use_length_penalty', 'use_stateful_reranking', 'precompute_doc_tokens',
-    'enable_amp_if_beneficial', 'include_contexts'
+    'enable_amp_if_beneficial', 'include_contexts',
+    // 新增重排序配置
+    'use_reranker', 'reranker_model_name', 'reranker_top_n', 'reranker_weight', 'reranker_backend'
   ];
   
   allConfigElements.forEach(elementId => {

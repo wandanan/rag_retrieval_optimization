@@ -67,6 +67,13 @@ class ZipperV3Config:
     max_length: int = 256
     precompute_doc_tokens: bool = False
     enable_amp_if_beneficial: bool = True
+    
+    # --- 新增: 重排序配置 ---
+    use_reranker: bool = True
+    reranker_model_name: str = "BAAI/bge-reranker-large"
+    reranker_top_n: int = 50
+    reranker_weight: float = 1.5
+    reranker_backend: str = "auto"  # 新增：重排序后端选择
 
 
 @dataclass
@@ -244,6 +251,197 @@ class TokenLevelEncoder:
                 raise
         return out
 
+
+# --- 新增: 重排序器类 ---
+class CrossEncoderReranker:
+    """交叉编码器重排序器，支持多种后端：FlagEmbedding、HuggingFace transformers、ONNX"""
+    
+    def __init__(self, model_name: str = "BAAI/bge-reranker-large", use_fp16: bool = True, backend: str = "auto"):
+        self.model_name = model_name
+        self.use_fp16 = use_fp16 and device.type == 'cuda'
+        self.backend = backend
+        self.model = None
+        self.tokenizer = None
+        
+        # 尝试按优先级加载不同的后端
+        self._load_model()
+    
+    def _load_model(self):
+        """按优先级加载重排序模型"""
+        backends_to_try = []
+        
+        if self.backend == "auto":
+            # 自动选择：优先FlagEmbedding，然后是HF，最后是ONNX
+            backends_to_try = ["flagembedding", "transformers", "onnx"]
+        else:
+            backends_to_try = [self.backend]
+        
+        for backend_type in backends_to_try:
+            if self._try_load_backend(backend_type):
+                logger.info(f"重排序模型加载成功，使用后端: {backend_type}")
+                return
+        
+        logger.error("所有重排序后端都加载失败，重排序功能将被禁用")
+    
+    def _try_load_backend(self, backend_type: str) -> bool:
+        """尝试加载指定的后端"""
+        try:
+            if backend_type == "flagembedding":
+                return self._load_flagembedding()
+            elif backend_type == "transformers":
+                return self._load_transformers()
+            elif backend_type == "onnx":
+                return self._load_onnx()
+            return False
+        except Exception as e:
+            logger.warning(f"加载{backend_type}后端失败: {e}")
+            return False
+    
+    def _load_flagembedding(self) -> bool:
+        """加载FlagEmbedding后端"""
+        try:
+            from FlagEmbedding import FlagReranker
+            self.model = FlagReranker(
+                self.model_name,
+                use_fp16=self.use_fp16
+            )
+            return True
+        except ImportError:
+            logger.warning("FlagEmbedding未安装")
+            return False
+    
+    def _load_transformers(self) -> bool:
+        """加载HuggingFace transformers后端"""
+        try:
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
+            self.model.eval()
+            if self.use_fp16 and device.type == 'cuda':
+                self.model = self.model.half()
+            self.model = self.model.to(device)
+            return True
+        except Exception as e:
+            logger.warning(f"加载transformers后端失败: {e}")
+            return False
+    
+    def _load_onnx(self) -> bool:
+        """加载ONNX后端"""
+        try:
+            from optimum.onnxruntime import ORTModelForSequenceClassification
+            from transformers import AutoTokenizer
+            
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            # 尝试加载ONNX模型，如果失败则回退到原始模型
+            try:
+                self.model = ORTModelForSequenceClassification.from_pretrained(
+                    self.model_name, 
+                    file_name="onnx/model.onnx"
+                )
+            except:
+                # 如果没有ONNX文件，使用原始模型
+                self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
+                self.model.eval()
+                if self.use_fp16 and device.type == 'cuda':
+                    self.model = self.model.half()
+                self.model = self.model.to(device)
+            return True
+        except Exception as e:
+            logger.warning(f"加载ONNX后端失败: {e}")
+            return False
+    
+    def rerank(self, query: str, documents: List[str], top_n: int = None) -> List[Tuple[int, float]]:
+        """
+        对文档进行重排序
+        
+        Args:
+            query: 查询文本
+            documents: 候选文档列表
+            top_n: 返回前N个结果，如果为None则返回所有
+            
+        Returns:
+            List[Tuple[int, float]]: (文档索引, 重排序分数) 的列表，按分数降序排列
+        """
+        if self.model is None or not documents:
+            return []
+        
+        try:
+            if hasattr(self.model, 'compute_score'):  # FlagEmbedding
+                return self._rerank_flagembedding(query, documents, top_n)
+            else:  # Transformers/ONNX
+                return self._rerank_transformers(query, documents, top_n)
+        except Exception as e:
+            logger.error(f"重排序失败: {e}")
+            return []
+    
+    def _rerank_flagembedding(self, query: str, documents: List[str], top_n: int = None) -> List[Tuple[int, float]]:
+        """使用FlagEmbedding进行重排序"""
+        # 准备查询-文档对
+        pairs = [[query, doc] for doc in documents]
+        
+        # 批量计算重排序分数
+        scores = self.model.compute_score(pairs)
+        
+        # 如果scores是单个值，转换为列表
+        if isinstance(scores, (int, float)):
+            scores = [scores]
+        
+        # 创建(索引, 分数)对并排序
+        scored_pairs = [(i, score) for i, score in enumerate(scores)]
+        scored_pairs.sort(key=lambda x: x[1], reverse=True)
+        
+        # 限制返回数量
+        if top_n is not None:
+            scored_pairs = scored_pairs[:top_n]
+        
+        return scored_pairs
+    
+    def _rerank_transformers(self, query: str, documents: List[str], top_n: int = None) -> List[Tuple[int, float]]:
+        """使用Transformers/ONNX进行重排序"""
+        # 准备查询-文档对
+        pairs = [['query', query], ['passage', doc] for doc in documents]
+        
+        # 使用tokenizer处理输入
+        with torch.no_grad():
+            inputs = self.tokenizer(
+                pairs, 
+                padding=True, 
+                truncation=True, 
+                return_tensors='pt', 
+                max_length=512
+            )
+            
+            # 将输入移到正确的设备
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+            
+            # 计算分数
+            outputs = self.model(**inputs, return_dict=True)
+            scores = outputs.logits.view(-1, ).float()
+            
+            # 创建(索引, 分数)对并排序
+            scored_pairs = [(i, score.item()) for i, score in enumerate(scores)]
+            scored_pairs.sort(key=lambda x: x[1], reverse=True)
+            
+            # 限制返回数量
+            if top_n is not None:
+                scored_pairs = scored_pairs[:top_n]
+            
+            return scored_pairs
+    
+    def is_available(self) -> bool:
+        """检查重排序器是否可用"""
+        return self.model is not None
+    
+    def get_backend_info(self) -> str:
+        """获取当前使用的后端信息"""
+        if hasattr(self.model, 'compute_score'):
+            return "FlagEmbedding"
+        elif hasattr(self.model, 'forward'):
+            return "Transformers/ONNX"
+        else:
+            return "Unknown"
+
+
 # --- V3 主引擎 ---
 class AdvancedZipperQueryEngineV3:
     def __init__(self, config: ZipperV3Config):
@@ -255,6 +453,21 @@ class AdvancedZipperQueryEngineV3:
             hf_model_name=config.hf_model_name
         )
         
+        # --- 新增: 初始化重排序器 ---
+        if config.use_reranker:
+            self.reranker = CrossEncoderReranker(
+                model_name=config.reranker_model_name,
+                use_fp16=config.enable_amp_if_beneficial,
+                backend=config.reranker_backend
+            )
+            if self.reranker.is_available():
+                logger.info(f"重排序器初始化成功: {config.reranker_model_name}")
+            else:
+                logger.warning("重排序器初始化失败，将禁用重排序功能")
+                config.use_reranker = False
+        else:
+            self.reranker = None
+        
         if config.use_multi_head and config.embedding_dim % config.num_heads != 0:
             print(config.embedding_dim, config.num_heads)
             raise ValueError("embedding_dim 必须能被 num_heads 整除")
@@ -264,7 +477,7 @@ class AdvancedZipperQueryEngineV3:
         self.bm25_index: Optional[BM25Okapi] = None
         self.bm25_idx_to_pid: Dict[int, int] = {}
         
-        logger.info("AdvancedZipperQueryEngine V3 初始化完成 (多策略优化版)")
+        logger.info("AdvancedZipperQueryEngine V3 初始化完成 (多策略优化版 + 重排序)")
 
     def build_document_index(self, documents: Dict[int, str]):
         logger.info(f"开始构建V3索引，共 {len(documents)} 个文档...")
@@ -394,6 +607,45 @@ class AdvancedZipperQueryEngineV3:
             else:
                 fused_scores[pid] = norm_colbert
         
+        # 5. --- 新增: 重排序阶段 ---
+        if self.config.use_reranker and self.reranker and self.reranker.is_available():
+            logger.info("开始重排序阶段...")
+            rerank_start_time = time.time()
+            
+            # 选择前N个候选文档进行重排序
+            top_candidates_for_rerank = sorted(candidate_pids, key=lambda pid: fused_scores.get(pid, 0), reverse=True)[:self.config.reranker_top_n]
+            candidate_docs = [self.documents[pid] for pid in top_candidates_for_rerank]
+            
+            # 执行重排序
+            rerank_results = self.reranker.rerank(query, candidate_docs, top_n=self.config.reranker_top_n)
+            
+            if rerank_results:
+                # 创建重排序分数映射
+                rerank_scores_map = {}
+                for idx, score in rerank_results:
+                    pid = top_candidates_for_rerank[idx]
+                    rerank_scores_map[pid] = score
+                
+                # 归一化重排序分数
+                rerank_vals = np.array(list(rerank_scores_map.values()))
+                if rerank_vals.size > 1:
+                    rerank_min, rerank_max = rerank_vals.min(), rerank_vals.max()
+                    for pid in rerank_scores_map:
+                        if rerank_max > rerank_min:
+                            rerank_scores_map[pid] = (rerank_scores_map[pid] - rerank_min) / (rerank_max - rerank_min)
+                        else:
+                            rerank_scores_map[pid] = 1.0
+                
+                # 融合重排序分数
+                for pid in top_candidates_for_rerank:
+                    if pid in rerank_scores_map:
+                        fused_scores[pid] = fused_scores.get(pid, 0) + self.config.reranker_weight * rerank_scores_map[pid]
+                
+                logger.info(f"重排序完成，处理了 {len(rerank_results)} 个文档，耗时: {time.time() - rerank_start_time:.3f}秒")
+            else:
+                logger.warning("重排序失败，使用原始融合分数")
+        
+        # 6. 最终排序和返回
         sorted_pids = sorted(candidate_pids, key=lambda pid: fused_scores.get(pid, 0), reverse=True)
         
         return [(pid, fused_scores.get(pid, 0), self.documents[pid]) for pid in sorted_pids[:self.config.final_top_k]]
