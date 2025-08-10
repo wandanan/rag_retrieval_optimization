@@ -3,17 +3,17 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>RAG 对比演示（注意力 vs 向量）</title>
+    <title>V3 RAG 引擎测试界面</title>
     <link rel="stylesheet" href="/web/styles.css" />
   </head>
   <body>
     <div class="container">
-      <h1>RAG 对比演示（注意力RAG vs 向量RAG）</h1>
+      <h1>V3 RAG 引擎测试界面</h1>
 
       <!-- 配置区域 -->
       <section class="config-section">
         <div class="config-header">
-          <h2>⚙️ 系统配置</h2>
+          <h2>⚙️ V3引擎配置</h2>
           <button id="clearConfigBtn" class="btn-secondary">清除配置</button>
         </div>
         <div class="config-grid">
@@ -50,6 +50,164 @@
             </form>
           </div>
 
+          <!-- V3引擎配置 -->
+          <div class="config-card">
+            <h3>🚀 V3引擎配置</h3>
+            
+            <!-- 预设配置选择器 -->
+            <div class="form-group">
+              <label>预设配置：</label>
+              <select id="preset_config" onchange="applyPreset()">
+                <option value="">自定义配置</option>
+                <option value="balanced">平衡模式</option>
+                <option value="precision">精确模式</option>
+                <option value="speed">快速模式</option>
+                <option value="conversational">对话模式</option>
+                <option value="hf_optimized">HF优化模式</option>
+              </select>
+            </div>
+            
+            <div class="form-group">
+              <label>编码后端：</label>
+              <select id="encoder_backend">
+                <option value="bge">BGE (推荐)</option>
+                <option value="hf">HuggingFace</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>BGE模型路径：</label>
+              <input type="text" id="bge_model_path" value="models--BAAI--bge-small-zh-v1.5/snapshots/7999e1d3359715c523056ef9478215996d62a620" />
+            </div>
+            <div class="form-group">
+              <label>HF模型名：</label>
+              <input type="text" id="hf_model_name" placeholder="例如：BAAI/bge-small-zh-v1.5" />
+            </div>
+            <div class="form-group">
+              <label>嵌入维度：</label>
+              <input type="number" id="embedding_dim" value="512" min="128" max="1024" step="128" />
+            </div>
+            
+            <!-- 混合搜索配置 -->
+            <div class="form-row">
+              <div class="form-group">
+                <label>BM25权重：</label>
+                <input type="number" id="bm25_weight" value="1.0" step="0.1" min="0" max="5" />
+              </div>
+              <div class="form-group">
+                <label>ColBERT权重：</label>
+                <input type="number" id="colbert_weight" value="1.5" step="0.1" min="0" max="5" />
+              </div>
+            </div>
+            
+            <!-- 高级优化配置 -->
+            <div class="form-row">
+              <div class="form-group">
+                <label>多头数量：</label>
+                <input type="number" id="num_heads" value="8" min="1" max="16" />
+              </div>
+              <div class="form-group">
+                <label>上下文影响：</label>
+                <input type="number" id="context_influence" value="0.3" step="0.1" min="0" max="1" />
+              </div>
+            </div>
+            
+            <!-- 新增的高级配置 -->
+            <div class="form-row">
+              <div class="form-group">
+                <label>长度惩罚系数：</label>
+                <input type="number" id="length_penalty_alpha" value="0.05" step="0.01" min="0" max="0.5" />
+              </div>
+              <div class="form-group">
+                <label>上下文记忆衰减：</label>
+                <input type="number" id="context_memory_decay" value="0.8" step="0.1" min="0" max="1" />
+              </div>
+            </div>
+            
+            <div class="form-row">
+              <div class="form-group">
+                <label>BM25候选数量：</label>
+                <input type="number" id="bm25_top_n" value="100" min="10" max="500" />
+              </div>
+              <div class="form-group">
+                <label>Top-K 结果：</label>
+                <input type="number" id="final_top_k" value="10" min="1" max="50" />
+              </div>
+            </div>
+            
+            <div class="form-row">
+              <div class="form-group">
+                <label>编码批次大小：</label>
+                <input type="number" id="encode_batch_size" value="64" min="1" max="256" />
+              </div>
+              <div class="form-group">
+                <label>最大序列长度：</label>
+                <input type="number" id="max_length" value="256" min="128" max="512" />
+              </div>
+            </div>
+            
+            <!-- 功能开关 -->
+            <div class="form-row">
+              <div class="form-group">
+                <label>
+                  <input type="checkbox" id="use_hybrid_search" checked />
+                  启用混合搜索
+                </label>
+              </div>
+              <div class="form-group">
+                <label>
+                  <input type="checkbox" id="use_multi_head" checked />
+                  启用多头注意力
+                </label>
+              </div>
+            </div>
+            
+            <div class="form-row">
+              <div class="form-group">
+                <label>
+                  <input type="checkbox" id="use_length_penalty" checked />
+                  启用长度惩罚
+                </label>
+              </div>
+              <div class="form-group">
+                <label>
+                  <input type="checkbox" id="use_stateful_reranking" checked />
+                  启用状态化重排序
+                </label>
+              </div>
+            </div>
+            
+            <div class="form-row">
+              <div class="form-group">
+                <label>
+                  <input type="checkbox" id="precompute_doc_tokens" />
+                  预计算文档Token向量
+                </label>
+              </div>
+              <div class="form-group">
+                <label>
+                  <input type="checkbox" id="enable_amp_if_beneficial" checked />
+                  启用AMP优化
+                </label>
+              </div>
+            </div>
+            
+            <!-- 配置管理按钮 -->
+            <div class="config-actions">
+              <button type="button" onclick="saveConfig()" class="btn btn-primary">
+                💾 保存配置
+              </button>
+              <button type="button" onclick="loadConfig()" class="btn btn-secondary">
+                📂 加载配置
+              </button>
+              <button type="button" onclick="clearConfig()" class="btn btn-warning">
+                🗑️ 清除配置
+              </button>
+              <button type="button" onclick="validateAndShowConfig()" class="btn btn-info">
+                ✅ 验证配置
+              </button>
+            </div>
+          </div>
+
           <!-- LLM配置 -->
           <div class="config-card">
             <h3>🤖 LLM配置</h3>
@@ -71,10 +229,6 @@
               <label>RAG 提示词：</label>
               <textarea id="prompt" rows="3" placeholder="自定义系统提示词，强调必须严格依据上下文回答"></textarea>
             </div>
-            <div class="form-group">
-              <label>Top-K 父块：</label>
-              <input type="number" id="top_k_parents" value="4" min="1" max="10" />
-            </div>
           </div>
         </div>
       </section>
@@ -82,42 +236,82 @@
       <!-- 问答区域 -->
       <section class="qa-section">
         <div class="qa-header">
-          <h2>💬 实时对比问答</h2>
+          <h2>💬 V3引擎问答测试</h2>
           <div class="qa-input-group">
             <input type="text" id="question" placeholder="请输入你的问题..." />
-            <button id="askBtn" class="btn-primary">同时提问</button>
+            <button id="askBtn" class="btn-primary">开始检索</button>
           </div>
         </div>
 
-        <!-- 对比结果 -->
-        <div class="comparison-container">
-          <!-- 注意力RAG -->
-          <div class="rag-panel attention-rag">
+        <!-- V3引擎结果 -->
+        <div class="v3-result-container">
+          <div class="v3-panel">
             <div class="panel-header">
-              <h3>🧠 注意力RAG</h3>
-              <div class="status-indicator" id="attnStatus">等待提问</div>
+              <h3>🚀 V3引擎结果</h3>
+              <div class="status-indicator" id="v3Status">等待提问</div>
             </div>
             <div class="answer-area">
-              <div class="answer-content" id="attnAnswer">请输入问题开始对比...</div>
+              <div class="answer-content" id="v3Answer">请输入问题开始测试...</div>
             </div>
             <div class="context-area">
-              <h4>📚 参考上下文</h4>
-              <div class="context-list" id="attnCtx"></div>
+              <h4>📚 检索结果</h4>
+              <div class="context-list" id="v3Ctx"></div>
+            </div>
+            <div class="metrics-area">
+              <h4>📊 检索指标</h4>
+              <div class="metrics-grid" id="v3Metrics"></div>
             </div>
           </div>
+        </div>
+      </section>
 
-          <!-- 向量RAG -->
-          <div class="rag-panel vector-rag">
-            <div class="panel-header">
-              <h3>🔍 向量RAG</h3>
-              <div class="status-indicator" id="vecStatus">等待提问</div>
+      <!-- 批量测试区域 -->
+      <section class="batch-test-section">
+        <div class="batch-test-header">
+          <h2>🧪 批量测试</h2>
+          <button id="refreshResultsBtn" class="btn-secondary">刷新结果列表</button>
+        </div>
+        
+        <div class="batch-test-container">
+          <!-- 测试文件上传 -->
+          <div class="test-upload-card">
+            <h3>📋 测试文件上传</h3>
+            <form id="batchTestForm">
+              <div class="form-group">
+                <label>选择测试文件（JSON格式）：</label>
+                <input type="file" id="testFileInput" accept=".json" required />
+                <small>支持您提供的测试数据结构格式</small>
+              </div>
+              
+              <!-- 结果选项 -->
+              <div class="result-option">
+                <label>
+                  <input type="checkbox" id="include_contexts" />
+                  在测试结果中包含召回的选段
+                </label>
+                <small>勾选将包含检索到的文档片段，取消勾选将只保存AI回答</small>
+              </div>
+              
+              <button type="submit" class="btn-primary">开始批量测试</button>
+              <div id="batchTestStatus" class="status"></div>
+            </form>
+          </div>
+
+          <!-- 测试进度 -->
+          <div class="test-progress-card" id="testProgressCard" style="display: none;">
+            <h3>📊 测试进度</h3>
+            <div class="progress-bar">
+              <div class="progress-fill" id="progressFill"></div>
             </div>
-            <div class="answer-area">
-              <div class="answer-content" id="vecAnswer">请输入问题开始对比...</div>
-            </div>
-            <div class="context-area">
-              <h4>📚 参考上下文</h4>
-              <div class="context-list" id="vecCtx"></div>
+            <div class="progress-text" id="progressText">准备中...</div>
+            <div class="test-summary" id="testSummary"></div>
+          </div>
+
+          <!-- 测试结果列表 -->
+          <div class="test-results-card">
+            <h3>📁 测试结果文件</h3>
+            <div class="results-list" id="resultsList">
+              <div class="loading">加载中...</div>
             </div>
           </div>
         </div>

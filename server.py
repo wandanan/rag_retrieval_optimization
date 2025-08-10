@@ -18,8 +18,8 @@ from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 load_dotenv()
 
-from models.vector_retriever import VectorRetriever
-from final_demo import FinalAttentionRetriever
+# 导入V3引擎
+from advanced_zipper_engine_v3 import AdvancedZipperQueryEngineV3, ZipperV3Config, ZipperV3State
 
 # 设置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -65,38 +65,42 @@ def split_text(text: str, chunk_size: int, overlap: int) -> List[str]:
     return chunks
 
 # -----------------------------
-# 索引状态管理
+# V3引擎索引状态管理
 # -----------------------------
 
-class IndexState:
+class V3IndexState:
     def __init__(self):
-        self.parent_docs: List[str] = []
-        self.sub_docs: List[str] = []
-        self.sub_to_parent: List[int] = []
-        self.parent_ids: List[str] = []
-        self.sub_ids: List[str] = []
-        self.sub_id_to_idx: Dict[str, int] = {}
-
-        self.vector: Optional[VectorRetriever] = None
-        self.attn: Optional[FinalAttentionRetriever] = None
-        self.index_built: bool = False
-
-        # 配置
-        self.parent_chunk_size: int = 1000
-        self.parent_overlap: int = 200
-        self.sub_chunk_size: int = 200
-        self.sub_overlap: int = 50
-        
-        # 文档哈希（用于检查是否需要重新构建索引）
+        self.documents: Dict[int, str] = {}
         self.document_hash: Optional[str] = None
         self.chunk_config_hash: Optional[str] = None
+        self.v3_engine: Optional[AdvancedZipperQueryEngineV3] = None
+        self.index_built: bool = False
+        
+        # 文档切块配置
+        self.chunk_size: int = 500
+        self.overlap: int = 100
+        
+        # V3引擎配置
+        self.v3_config: ZipperV3Config = ZipperV3Config()
+        
+        # 会话状态管理
+        self.session_states: Dict[str, ZipperV3State] = {}
+        
+        # 性能统计
+        self.stats = {
+            'total_queries': 0,
+            'total_retrieval_time': 0.0,
+            'total_llm_time': 0.0,
+            'cache_hits': 0,
+            'cache_misses': 0
+        }
 
     def clear(self):
         self.__init__()
     
     def get_chunk_config_hash(self) -> str:
         """获取切块配置的哈希值"""
-        config_str = f"{self.parent_chunk_size}_{self.parent_overlap}_{self.sub_chunk_size}_{self.sub_overlap}"
+        config_str = f"{self.chunk_size}_{self.overlap}"
         return hashlib.md5(config_str.encode()).hexdigest()
     
     def get_document_hash(self, text: str) -> str:
@@ -107,122 +111,161 @@ class IndexState:
         """获取索引的唯一标识符"""
         doc_hash = self.get_document_hash(text)
         config_hash = self.get_chunk_config_hash()
-        return f"{doc_hash}_{config_hash}"
+        return f"v3_{doc_hash}_{config_hash}"
+    
+    def get_v3_config_hash(self) -> str:
+        """获取V3引擎配置的哈希值"""
+        config_str = (
+            f"{self.v3_config.encoder_backend}_"
+            f"{self.v3_config.bge_model_path}_"
+            f"{self.v3_config.hf_model_name or 'none'}_"
+            f"{self.v3_config.bm25_weight}_"
+            f"{self.v3_config.colbert_weight}_"
+            f"{self.v3_config.num_heads}_"
+            f"{self.v3_config.context_influence}_"
+            f"{self.v3_config.final_top_k}_"
+            f"{self.v3_config.use_hybrid_search}_"
+            f"{self.v3_config.use_multi_head}_"
+            f"{self.v3_config.use_length_penalty}_"
+            f"{self.v3_config.use_stateful_reranking}"
+        )
+        return hashlib.md5(config_str.encode()).hexdigest()
     
     def save_index(self, index_key: str):
-        """保存索引到磁盘"""
-        if not self.index_built or self.vector is None:
-            logger.warning("索引未构建或向量检索器未初始化，无法保存")
+        """保存V3索引到磁盘"""
+        if not self.index_built or self.v3_engine is None:
+            logger.warning("V3索引未构建或引擎未初始化，无法保存")
             return
         
         try:
-            logger.info(f"开始保存索引: {index_key}")
+            logger.info(f"开始保存V3索引: {index_key}")
             
-            # 保存向量索引
-            vector_path = os.path.join(VECTOR_DB_DIR, f"{index_key}.faiss")
-            logger.info(f"保存向量索引到: {vector_path}")
-            self.vector.save_index(vector_path)
-            
-            # 保存文档状态
-            state_data = {
-                'parent_docs': self.parent_docs,
-                'sub_docs': self.sub_docs,
-                'sub_to_parent': self.sub_to_parent,
-                'parent_ids': self.parent_ids,
-                'sub_ids': self.sub_ids,
-                'sub_id_to_idx': self.sub_id_to_idx,
-                'parent_chunk_size': self.parent_chunk_size,
-                'parent_overlap': self.parent_overlap,
-                'sub_chunk_size': self.sub_chunk_size,
-                'sub_overlap': self.sub_overlap,
+            # 保存文档数据
+            docs_data = {
+                'documents': self.documents,
                 'document_hash': self.document_hash,
                 'chunk_config_hash': self.chunk_config_hash,
+                'chunk_size': self.chunk_size,
+                'overlap': self.overlap,
+                'v3_config': self.v3_config,
                 'index_built': True
             }
             
-            state_path = os.path.join(VECTOR_DB_DIR, f"{index_key}.pkl")
-            logger.info(f"保存状态数据到: {state_path}")
-            with open(state_path, 'wb') as f:
-                pickle.dump(state_data, f)
+            docs_path = os.path.join(VECTOR_DB_DIR, f"{index_key}.pkl")
+            logger.info(f"保存文档数据到: {docs_path}")
+            with open(docs_path, 'wb') as f:
+                pickle.dump(docs_data, f)
             
-            logger.info(f"索引保存成功: {index_key}")
+            # 保存BM25索引
+            if self.v3_engine.bm25_index is not None:
+                bm25_path = os.path.join(VECTOR_DB_DIR, f"{index_key}_bm25.pkl")
+                logger.info(f"保存BM25索引到: {bm25_path}")
+                with open(bm25_path, 'wb') as f:
+                    pickle.dump({
+                        'bm25_index': self.v3_engine.bm25_index,
+                        'bm25_idx_to_pid': self.v3_engine.bm25_idx_to_pid
+                    }, f)
+            
+            # 保存预计算的token嵌入（如果启用）
+            if self.v3_config.precompute_doc_tokens and self.v3_engine.doc_token_embeddings:
+                token_path = os.path.join(VECTOR_DB_DIR, f"{index_key}_tokens.pkl")
+                logger.info(f"保存token嵌入到: {token_path}")
+                with open(token_path, 'wb') as f:
+                    pickle.dump(self.v3_engine.doc_token_embeddings, f)
+            
+            logger.info(f"V3索引保存成功: {index_key}")
             
         except Exception as e:
-            logger.error(f"保存索引失败: {e}")
+            logger.error(f"保存V3索引失败: {e}")
             import traceback
             logger.error(f"详细错误信息: {traceback.format_exc()}")
     
     def load_index(self, index_key: str) -> bool:
-        """从磁盘加载索引"""
+        """从磁盘加载V3索引"""
         try:
-            # 加载向量索引
-            vector_path = os.path.join(VECTOR_DB_DIR, f"{index_key}.faiss")
-            logger.info(f"检查向量索引文件: {vector_path}")
-            if not os.path.exists(vector_path):
-                logger.info(f"向量索引文件不存在: {vector_path}")
+            # 检查文档数据文件
+            docs_path = os.path.join(VECTOR_DB_DIR, f"{index_key}.pkl")
+            logger.info(f"检查文档数据文件: {docs_path}")
+            if not os.path.exists(docs_path):
+                logger.info(f"文档数据文件不存在: {docs_path}")
                 return False
             
-            # 检查向量索引的元数据文件
-            vector_meta_path = os.path.join(VECTOR_DB_DIR, f"{index_key}.faiss.meta")
-            logger.info(f"检查向量索引元数据文件: {vector_meta_path}")
-            if not os.path.exists(vector_meta_path):
-                logger.info(f"向量索引元数据文件不存在: {vector_meta_path}")
-                return False
+            # 加载文档数据
+            logger.info("加载文档数据...")
+            with open(docs_path, 'rb') as f:
+                docs_data = pickle.load(f)
             
-            # 加载文档状态
-            state_path = os.path.join(VECTOR_DB_DIR, f"{index_key}.pkl")
-            logger.info(f"检查状态文件: {state_path}")
-            if not os.path.exists(state_path):
-                logger.info(f"状态文件不存在: {state_path}")
-                return False
+            # 恢复基本状态
+            self.documents = docs_data['documents']
+            self.document_hash = docs_data['document_hash']
+            self.chunk_config_hash = docs_data['chunk_config_hash']
+            self.chunk_size = docs_data['chunk_size']
+            self.overlap = docs_data['overlap']
+            self.v3_config = docs_data['v3_config']
             
-            # 确保向量检索器已初始化
-            logger.info("初始化向量检索器...")
-            _ensure_embedder()
+            # 初始化V3引擎
+            logger.info("初始化V3引擎...")
+            self.v3_engine = AdvancedZipperQueryEngineV3(self.v3_config)
             
-            logger.info("加载向量索引...")
-            self.vector.load_index(vector_path)
+            # 加载BM25索引
+            bm25_path = os.path.join(VECTOR_DB_DIR, f"{index_key}_bm25.pkl")
+            if os.path.exists(bm25_path):
+                logger.info("加载BM25索引...")
+                with open(bm25_path, 'rb') as f:
+                    bm25_data = pickle.load(f)
+                    self.v3_engine.bm25_index = bm25_data['bm25_index']
+                    self.v3_engine.bm25_idx_to_pid = bm25_data['bm25_idx_to_pid']
             
-            logger.info("加载文档状态...")
-            with open(state_path, 'rb') as f:
-                state_data = pickle.load(f)
+            # 加载预计算的token嵌入
+            token_path = os.path.join(VECTOR_DB_DIR, f"{index_key}_tokens.pkl")
+            if os.path.exists(token_path):
+                logger.info("加载token嵌入...")
+                with open(token_path, 'rb') as f:
+                    self.v3_engine.doc_token_embeddings = pickle.load(f)
+            else:
+                # 如果没有预计算的token嵌入，重新构建
+                logger.info("重新构建token嵌入...")
+                self.v3_engine.documents = self.documents
+                self.v3_engine.build_document_index(self.documents)
             
-            # 恢复状态
-            self.parent_docs = state_data['parent_docs']
-            self.sub_docs = state_data['sub_docs']
-            self.sub_to_parent = state_data['sub_to_parent']
-            self.parent_ids = state_data['parent_ids']
-            self.sub_ids = state_data['sub_ids']
-            self.sub_id_to_idx = state_data['sub_id_to_idx']
-            self.parent_chunk_size = state_data['parent_chunk_size']
-            self.parent_overlap = state_data['parent_overlap']
-            self.sub_chunk_size = state_data['sub_chunk_size']
-            self.sub_overlap = state_data['sub_overlap']
-            self.document_hash = state_data['document_hash']
-            self.chunk_config_hash = state_data['chunk_config_hash']
             self.index_built = True
-            
-            # 预计算父文档token嵌入
-            if self.attn:
-                logger.info("预计算父文档token嵌入...")
-                self.attn.precompute_document_semantic_embeddings(self.parent_docs)
-            
-            logger.info(f"索引已加载: {index_key}")
+            logger.info(f"V3索引已加载: {index_key}")
             return True
             
         except Exception as e:
-            logger.error(f"加载索引失败: {e}")
+            logger.error(f"加载V3索引失败: {e}")
             import traceback
             logger.error(f"详细错误信息: {traceback.format_exc()}")
             return False
+    
+    def get_or_create_session_state(self, session_id: str) -> ZipperV3State:
+        """获取或创建会话状态"""
+        if session_id not in self.session_states:
+            # 创建新的会话状态
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            context_vector = torch.zeros(self.v3_config.embedding_dim, device=device)
+            self.session_states[session_id] = ZipperV3State(
+                original_query="",
+                context_vector=context_vector
+            )
+        return self.session_states[session_id]
+    
+    def update_session_state(self, session_id: str, query: str, results: List[Tuple[int, float, str]]):
+        """更新会话状态"""
+        if self.v3_engine and self.v3_config.use_stateful_reranking:
+            session_state = self.get_or_create_session_state(session_id)
+            session_state.original_query = query
+            self.v3_engine.update_state(session_state, results)
+            self.session_states[session_id] = session_state
 
-state = IndexState()
+# 全局V3状态
+v3_state = V3IndexState()
 
 # -----------------------------
 # FastAPI 应用
 # -----------------------------
 
-app = FastAPI(title="RAG对比演示：注意力RAG vs 向量RAG")
+app = FastAPI(title="V3 RAG 引擎测试系统")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -242,75 +285,52 @@ async def root_page():
     return FileResponse(index_path)
 
 # -----------------------------
-# 工具函数
-# -----------------------------
-
-def _hash_text(text: str) -> str:
-    return hashlib.md5(text.encode("utf-8")).hexdigest()
-
-def _ensure_embedder():
-    if state.vector is None:
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        logger.info(f"初始化向量检索器，设备: {device}")
-        
-        # 根据是否有token选择不同的模型
-        if HF_TOKEN:
-            # 有token时优先使用BGE中文模型
-            model_options = [
-                'BAAI/bge-large-zh-v1.5',   # 中文BGE大模型
-                'BAAI/bge-base-zh-v1.5',    # 中文BGE基础模型
-                'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',  # 多语言模型
-            ]
-        else:
-            # 无token时使用公开模型
-            model_options = [
-                'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',  # 多语言模型
-                'sentence-transformers/all-MiniLM-L6-v2',  # 英文模型作为备选
-            ]
-        
-        for model_name in model_options:
-            try:
-                logger.info(f"尝试加载模型: {model_name}")
-                state.vector = VectorRetriever(
-                    model_name=model_name,
-                    device=device,
-                    backend='sentence-transformers',
-                    hf_token=HF_TOKEN  # 传入token
-                )
-                logger.info(f"成功加载模型: {model_name}")
-                break
-            except Exception as e:
-                logger.warning(f"模型 {model_name} 加载失败: {e}")
-                continue
-        
-        if state.vector is None:
-            raise RuntimeError("所有模型都无法加载，请检查网络连接或模型缓存")
-    
-    if state.attn is None:
-        state.attn = FinalAttentionRetriever()
-        if state.vector:
-            state.attn.set_semantic_embedder(state.vector)
-
-# -----------------------------
 # API 端点
 # -----------------------------
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "index_built": state.index_built}
+    v3_features = {}
+    if v3_state.v3_config:
+        v3_features = {
+            "hybrid_search": v3_state.v3_config.use_hybrid_search,
+            "multi_head": v3_state.v3_config.use_multi_head,
+            "stateful_reranking": v3_state.v3_config.use_stateful_reranking,
+            "length_penalty": v3_state.v3_config.use_length_penalty,
+            "precompute_doc_tokens": v3_state.v3_config.precompute_doc_tokens,
+            "enable_amp_if_beneficial": v3_state.v3_config.enable_amp_if_beneficial,
+            "encoder_backend": v3_state.v3_config.encoder_backend,
+            "bm25_weight": v3_state.v3_config.bm25_weight,
+            "colbert_weight": v3_state.v3_config.colbert_weight,
+            "num_heads": v3_state.v3_config.num_heads,
+            "context_influence": v3_state.v3_config.context_influence,
+            "length_penalty_alpha": v3_state.v3_config.length_penalty_alpha,
+            "context_memory_decay": v3_state.v3_config.context_memory_decay,
+            "bm25_top_n": v3_state.v3_config.bm25_top_n,
+            "encode_batch_size": v3_state.v3_config.encode_batch_size,
+            "max_length": v3_state.v3_config.max_length
+        }
+    
+    return {
+        "status": "ok", 
+        "index_built": v3_state.index_built,
+        "engine_type": "V3 Advanced Zipper Engine",
+        "features": v3_features,
+        "session_count": len(v3_state.session_states),
+        "total_queries": v3_state.stats.get('total_queries', 0),
+        "avg_retrieval_time": v3_state.stats.get('total_retrieval_time', 0) / max(v3_state.stats.get('total_queries', 1), 1)
+    }
 
 @app.post("/api/clear")
 async def clear():
-    state.clear()
-    return {"status": "cleared"}
+    v3_state.clear()
+    return {"status": "cleared", "message": "V3引擎状态已清空"}
 
 @app.post("/api/upload")
 async def upload(
     file: UploadFile = File(...),
-    parent_chunk_size: int = Form(1000),
-    parent_overlap: int = Form(200),
-    sub_chunk_size: int = Form(200),
-    sub_overlap: int = Form(50)
+    chunk_size: int = Form(500),
+    overlap: int = Form(100)
 ):
     try:
         raw = await file.read()
@@ -322,15 +342,13 @@ async def upload(
         raise HTTPException(status_code=400, detail="空文件")
 
     # 更新配置
-    state.parent_chunk_size = parent_chunk_size
-    state.parent_overlap = parent_overlap
-    state.sub_chunk_size = sub_chunk_size
-    state.sub_overlap = sub_overlap
+    v3_state.chunk_size = chunk_size
+    v3_state.overlap = overlap
 
     # 计算文档和配置哈希
-    doc_hash = state.get_document_hash(text)
-    config_hash = state.get_chunk_config_hash()
-    index_key = state.get_index_key(text)
+    doc_hash = v3_state.get_document_hash(text)
+    config_hash = v3_state.get_chunk_config_hash()
+    index_key = v3_state.get_index_key(text)
     
     logger.info(f"文档哈希: {doc_hash}")
     logger.info(f"配置哈希: {config_hash}")
@@ -338,173 +356,211 @@ async def upload(
     
     # 检查是否已有缓存的索引
     logger.info(f"检查缓存索引: {index_key}")
-    if state.load_index(index_key):
+    if v3_state.load_index(index_key):
         logger.info(f"使用缓存的索引: {index_key}")
+        v3_state.stats['cache_hits'] += 1
         return {
-            "message": "使用缓存的索引",
-            "num_parents": len(state.parent_docs),
-            "num_subs": len(state.sub_docs),
-            "cached": True
+            "message": "使用缓存的V3索引",
+            "num_docs": len(v3_state.documents),
+            "cached": True,
+            "index_key": index_key
         }
 
-    logger.info(f"构建新索引: {index_key}")
+    logger.info(f"构建新V3索引: {index_key}")
+    v3_state.stats['cache_misses'] += 1
     
-    # 切割父文档
-    parent_docs = split_text(text, parent_chunk_size, parent_overlap)
-    parent_ids = [f"parent_{i}" for i in range(len(parent_docs))]
-
-    # 子文档：基于每个父文档二次切割
-    sub_docs: List[str] = []
-    sub_to_parent: List[int] = []
-    for pid, ptext in enumerate(parent_docs):
-        parts = split_text(ptext, sub_chunk_size, sub_overlap)
-        sub_docs.extend(parts)
-        sub_to_parent.extend([pid] * len(parts))
-
-    sub_ids = [f"sub_{i}" for i in range(len(sub_docs))]
-    # 建立反向索引，便于查询阶段 O(1) 查找
-    sub_id_to_idx = {sid: i for i, sid in enumerate(sub_ids)}
-
-    # 构建向量索引（对子文档）
-    _ensure_embedder()
-    state.vector.build_index(sub_docs, doc_ids=sub_ids)
-
-    # 预计算父文档token嵌入供注意力轻量机制使用
-    state.attn.precompute_document_semantic_embeddings(parent_docs)
-
-    # 保存状态
-    state.parent_docs = parent_docs
-    state.parent_ids = parent_ids
-    state.sub_docs = sub_docs
-    state.sub_ids = sub_ids
-    state.sub_id_to_idx = sub_id_to_idx
-    state.sub_to_parent = sub_to_parent
-    state.document_hash = doc_hash
-    state.chunk_config_hash = config_hash
-    state.index_built = True
-
+    # 切割文档
+    chunks = split_text(text, chunk_size, overlap)
+    doc_ids = list(range(len(chunks)))
+    documents = {doc_id: chunk for doc_id, chunk in zip(doc_ids, chunks)}
+    
+    # 构建V3引擎索引
+    v3_state.documents = documents
+    v3_state.document_hash = doc_hash
+    v3_state.chunk_config_hash = config_hash
+    
+    # 初始化V3引擎并构建索引
+    v3_state.v3_engine = AdvancedZipperQueryEngineV3(v3_state.v3_config)
+    v3_state.v3_engine.build_document_index(documents)
+    v3_state.index_built = True
+    
     # 保存索引到磁盘
-    state.save_index(index_key)
+    v3_state.save_index(index_key)
 
     return {
-        "message": "索引已构建并保存",
-        "num_parents": len(parent_docs),
-        "num_subs": len(sub_docs),
-        "cached": False
+        "message": "V3索引已构建并保存",
+        "num_docs": len(documents),
+        "cached": False,
+        "index_key": index_key
     }
 
-@app.post("/api/query")
-async def query(
-    payload: Dict[str, Any]
-):
-    if not state.index_built:
-        raise HTTPException(status_code=400, detail="尚未上传并构建索引")
+@app.post("/api/v3_query")
+async def v3_query(payload: Dict[str, Any]):
+    """V3引擎查询接口"""
+    if not v3_state.index_built:
+        raise HTTPException(status_code=400, detail="尚未上传并构建V3索引")
 
     question: str = payload.get("question", "").strip()
-    mode: str = payload.get("mode", "attention")  # 'attention' | 'vector'
-    top_k_parents: int = int(payload.get("top_k_parents", 4))
-    top_k_sub: int = int(payload.get("top_k_sub", 50))
-
-    llm_cfg = payload.get("llm", {})
-    base_url: str = llm_cfg.get("base_url", "")
-    api_key: str = llm_cfg.get("api_key", "")
-    model: str = llm_cfg.get("model", "gpt-3.5-turbo")
-    temperature: float = float(llm_cfg.get("temperature", 0.2))
-    rag_prompt: str = payload.get("prompt", "")
-
     if not question:
         raise HTTPException(status_code=400, detail="缺少问题")
 
-    # 1) 子文档相似度检索
-    doc_ids, scores = state.vector.search(question, top_k=max(top_k_sub, top_k_parents))
-
-    # 2) 聚合到父文档
-    parent_best: Dict[int, float] = {}
-    parent_hits: Dict[int, List[Tuple[str, float]]] = {}
-    for did, sc in zip(doc_ids, scores):
-        idx = state.sub_id_to_idx.get(did)
-        if idx is None:
-            continue
-        pid = state.sub_to_parent[idx]
-        parent_best[pid] = max(parent_best.get(pid, -1e9), float(sc))
-        parent_hits.setdefault(pid, []).append((did, float(sc)))
-
-    parent_candidates = sorted(parent_best.items(), key=lambda x: x[1], reverse=True)
-
-    # 3) 重新排序（注意力 or 仅向量）
-    selected: List[Tuple[int, float, float]] = []  # (pid, vec_score, attn_score)
-    if mode == 'attention':
-        for pid, vsc in parent_candidates[: max(5*top_k_parents, top_k_parents)]:
-            ptext = state.parent_docs[pid]
-            attn = state.attn.compute_lightweight_attention_score(question, ptext)
-            selected.append((pid, float(vsc), float(attn)))
-        # 以注意力分为主、向量为辅
-        selected.sort(key=lambda x: (x[2], x[1]), reverse=True)
-    else:
-        for pid, vsc in parent_candidates:
-            selected.append((pid, float(vsc), 0.0))
-        selected.sort(key=lambda x: x[1], reverse=True)
-
-    selected = selected[:top_k_parents]
-
-    # 4) 组织上下文
-    contexts: List[Dict[str, Any]] = []
-    for pid, vsc, asc in selected:
-        ctxt = state.parent_docs[pid]
-        contexts.append({
-            "parent_id": state.parent_ids[pid],
-            "vector_score": vsc,
-            "attention_score": asc,
-            "content": ctxt
-        })
-
-    # 5) 调用LLM（OpenAI兼容）
-    prompt = rag_prompt.strip() or (
-        "你是一个严谨的中文助手。请严格基于给定的参考上下文回答用户问题：\n"
-        "- 如果上下文无法支持答案，必须直接回答：‘无法根据参考上下文回答。’\n"
-        "- 禁止编造或引入上下文以外的信息。\n"
-        "- 回答尽量精炼。"
+    # 获取V3引擎配置
+    v3_config_data = payload.get("v3_config", {})
+    
+    # 检查是否需要重新初始化引擎（配置变更）
+    current_config_hash = v3_state.get_v3_config_hash()
+    new_config = ZipperV3Config(
+        encoder_backend=v3_config_data.get("encoder_backend", "bge"),
+        bge_model_path=v3_config_data.get("bge_model_path", "BAAI/bge-small-zh-v1.5"),
+        hf_model_name=v3_config_data.get("hf_model_name"),
+        embedding_dim=int(v3_config_data.get("embedding_dim", 512)),
+        bm25_weight=float(v3_config_data.get("bm25_weight", 1.0)),
+        colbert_weight=float(v3_config_data.get("colbert_weight", 1.5)),
+        num_heads=int(v3_config_data.get("num_heads", 8)),
+        context_influence=float(v3_config_data.get("context_influence", 0.3)),
+        final_top_k=int(v3_config_data.get("final_top_k", 10)),
+        # 新增的高级配置项
+        length_penalty_alpha=float(v3_config_data.get("length_penalty_alpha", 0.05)),
+        context_memory_decay=float(v3_config_data.get("context_memory_decay", 0.8)),
+        bm25_top_n=int(v3_config_data.get("bm25_top_n", 100)),
+        encode_batch_size=int(v3_config_data.get("encode_batch_size", 64)),
+        max_length=int(v3_config_data.get("max_length", 256)),
+        # 功能开关
+        use_hybrid_search=bool(v3_config_data.get("use_hybrid_search", True)),
+        use_multi_head=bool(v3_config_data.get("use_multi_head", True)),
+        use_length_penalty=bool(v3_config_data.get("use_length_penalty", True)),
+        use_stateful_reranking=bool(v3_config_data.get("use_stateful_reranking", True)),
+        precompute_doc_tokens=bool(v3_config_data.get("precompute_doc_tokens", False)),
+        enable_amp_if_beneficial=bool(v3_config_data.get("enable_amp_if_beneficial", True))
     )
+    
+    new_config_hash = hashlib.md5(
+        f"{new_config.encoder_backend}_{new_config.bge_model_path}_{new_config.hf_model_name or 'none'}_"
+        f"{new_config.embedding_dim}_{new_config.bm25_weight}_{new_config.colbert_weight}_{new_config.num_heads}_"
+        f"{new_config.context_influence}_{new_config.final_top_k}_"
+        f"{new_config.length_penalty_alpha}_{new_config.context_memory_decay}_"
+        f"{new_config.bm25_top_n}_{new_config.encode_batch_size}_{new_config.max_length}_"
+        f"{new_config.use_hybrid_search}_{new_config.use_multi_head}_"
+        f"{new_config.use_length_penalty}_{new_config.use_stateful_reranking}_"
+        f"{new_config.precompute_doc_tokens}_{new_config.enable_amp_if_beneficial}".encode()
+    ).hexdigest()
+    
+    # 如果配置变更，重新初始化引擎
+    if current_config_hash != new_config_hash:
+        logger.info("V3引擎配置变更，重新初始化...")
+        v3_state.v3_config = new_config
+        v3_state.v3_engine = AdvancedZipperQueryEngineV3(new_config)
+        v3_state.v3_engine.build_document_index(v3_state.documents)
+        # 清空会话状态
+        v3_state.session_states.clear()
+    
+    # 获取或创建会话状态
+    session_id = payload.get("session_id", "default")
+    session_state = v3_state.get_or_create_session_state(session_id)
+    
+    # 执行V3检索
+    start_time = time.time()
+    try:
+        results = v3_state.v3_engine.retrieve(question, state=session_state)
+        retrieval_time = time.time() - start_time
+        
+        # 更新会话状态
+        v3_state.update_session_state(session_id, question, results)
+        
+        # 计算检索指标
+        metrics = {
+            "retrieval_time": retrieval_time,
+            "num_candidates": len(results),
+            "top_score": results[0][1] if results else 0.0,
+            "score_range": {
+                "min": min([r[1] for r in results]) if results else 0.0,
+                "max": max([r[1] for r in results]) if results else 0.0
+            },
+            "engine_config": {
+                "hybrid_search": v3_state.v3_config.use_hybrid_search,
+                "multi_head": v3_state.v3_config.use_multi_head,
+                "stateful_reranking": v3_state.v3_config.use_stateful_reranking,
+                "length_penalty": v3_state.v3_config.use_length_penalty,
+                "bm25_weight": v3_state.v3_config.bm25_weight,
+                "colbert_weight": v3_state.v3_config.colbert_weight,
+                "embedding_dim": v3_state.v3_config.embedding_dim,
+                "num_heads": v3_state.v3_config.num_heads,
+                "context_influence": v3_state.v3_config.context_influence,
+                "length_penalty_alpha": v3_state.v3_config.length_penalty_alpha,
+                "context_memory_decay": v3_state.v3_config.context_memory_decay,
+                "bm25_top_n": v3_state.v3_config.bm25_top_n,
+                "encode_batch_size": v3_state.v3_config.encode_batch_size,
+                "max_length": v3_state.v3_config.max_length,
+                "precompute_doc_tokens": v3_state.v3_config.precompute_doc_tokens,
+                "enable_amp_if_beneficial": v3_state.v3_config.enable_amp_if_beneficial
+            }
+        }
+        
+        # 更新统计信息
+        v3_state.stats['total_queries'] += 1
+        v3_state.stats['total_retrieval_time'] += retrieval_time
+        
+    except Exception as e:
+        logger.error(f"V3检索失败: {e}")
+        raise HTTPException(status_code=500, detail=f"V3检索失败: {e}")
 
-    system_msg = {"role": "system", "content": prompt}
-    context_text = "\n\n".join([f"[片段{i+1} - {c['parent_id']}]\n{c['content']}" for i, c in enumerate(contexts)])
-    user_msg = {
-        "role": "user",
-        "content": f"参考上下文如下：\n{context_text}\n\n用户问题：{question}\n请仅依据参考上下文作答。若无法回答，请直接回复：无法根据参考上下文回答。"
-    }
-
-    llm_request = {
-        "model": model,
-        "messages": [system_msg, user_msg],
-        "temperature": temperature,
-        "stream": False
-    }
+    # 调用LLM生成答案
+    llm_cfg = payload.get("llm", {})
+    base_url: str = llm_cfg.get("base_url", "").strip()
+    api_key: str = llm_cfg.get("api_key", "").strip()
+    model: str = llm_cfg.get("model", "gpt-3.5-turbo").strip()
+    rag_prompt: str = payload.get("prompt", "").strip()
 
     answer = ""
     llm_latency = 0.0
+    
     if base_url and api_key:
         try:
             import requests
+            
+            # 组织上下文
+            contexts = []
+            for i, (doc_id, score, content) in enumerate(results):
+                contexts.append({
+                    "doc_id": doc_id,
+                    "score": score,
+                    "content": content[:500] + "..." if len(content) > 500 else content
+                })
+            
+            # 构建LLM请求
+            prompt = rag_prompt.strip() or (
+                "你是一个严谨的中文助手。请严格基于给定的参考上下文回答用户问题：\n"
+                "- 如果上下文无法支持答案，必须直接回答：‘无法根据参考上下文回答。’\n"
+                "- 禁止编造或引入上下文以外的信息。\n"
+                "- 回答尽量精炼。"
+            )
+
+            system_msg = {"role": "system", "content": prompt}
+            context_text = "\n\n".join([f"[片段{i+1} - 分数:{c['score']:.3f}]\n{c['content']}" for i, c in enumerate(contexts)])
+            user_msg = {
+                "role": "user", 
+                "content": f"参考上下文如下：\n{context_text}\n\n用户问题：{question}\n请仅依据参考上下文作答。若无法回答，请直接回复：无法根据参考上下文回答。"
+            }
+
+            llm_request = {
+                "model": model,
+                "messages": [system_msg, user_msg],
+                "temperature": 0.2,
+                "stream": False
+            }
+
             t0 = time.time()
             url = base_url
             headers = {
                 "Authorization": f"Bearer {api_key}", 
                 "Content-Type": "application/json",
                 "Accept": "application/json",
-                "Accept-Encoding": "identity"  # 禁用压缩，避免gzip解压问题
+                "Accept-Encoding": "identity"
             }
             
-            # 发送请求
-            resp = requests.post(
-                url, 
-                headers=headers, 
-                json=llm_request,  # 使用json参数而不是data
-                timeout=120,
-                stream=False
-            )
+            resp = requests.post(url, headers=headers, json=llm_request, timeout=120, stream=False)
             resp.raise_for_status()
             
-            # 解析响应
             try:
                 data = resp.json()
                 if "choices" in data and len(data["choices"]) > 0:
@@ -515,36 +571,311 @@ async def query(
                 answer = f"[LLM响应解析失败] {e}, 响应内容: {resp.text[:200]}"
                 
             llm_latency = time.time() - t0
+            v3_state.stats['total_llm_time'] += llm_latency
             
         except requests.exceptions.RequestException as e:
             answer = f"[LLM网络请求失败] {e}"
         except Exception as e:
             answer = f"[LLM调用失败] {e}"
     else:
-        answer = "[未配置LLM] 已返回候选上下文与排序结果。"
+        answer = "[未配置LLM] 已返回V3引擎检索结果。"
+
+    # 更新指标
+    metrics['llm_latency'] = llm_latency
+    metrics['total_latency'] = retrieval_time + llm_latency
 
     return {
-        "mode": mode,
-        "question": question,
         "answer": answer,
-        "contexts": contexts,
-        "top_k_parents": top_k_parents,
-        "llm_latency": llm_latency
+        "results": [
+            {
+                "doc_id": doc_id,
+                "score": float(score),
+                "content": content
+            }
+            for doc_id, score, content in results
+        ],
+        "metrics": metrics,
+        "session_id": session_id
     }
 
-@app.post("/api/compare")
-async def compare(payload: Dict[str, Any]):
-    # 运行注意力与向量两种模式
-    attn_payload = dict(payload)
-    attn_payload["mode"] = "attention"
-    vec_payload = dict(payload)
-    vec_payload["mode"] = "vector"
+@app.get("/api/v3/stats")
+async def get_v3_stats():
+    """获取V3引擎统计信息"""
+    if not v3_state.index_built:
+        return {"error": "索引未构建"}
+    
+    stats = v3_state.stats.copy()
+    if stats['total_queries'] > 0:
+        stats['avg_retrieval_time'] = stats['total_retrieval_time'] / stats['total_queries']
+        stats['avg_llm_time'] = stats['total_llm_time'] / stats['total_queries']
+        stats['cache_hit_rate'] = stats['cache_hits'] / (stats['cache_hits'] + stats['cache_misses'])
+    
+    return {
+        "engine_stats": stats,
+        "index_info": {
+            "num_documents": len(v3_state.documents),
+            "document_hash": v3_state.document_hash,
+            "chunk_config_hash": v3_state.chunk_config_hash,
+            "chunk_size": v3_state.chunk_size,
+            "overlap": v3_state.overlap
+        },
+        "engine_config": {
+            "encoder_backend": v3_state.v3_config.encoder_backend,
+            "use_hybrid_search": v3_state.v3_config.use_hybrid_search,
+            "use_multi_head": v3_state.v3_config.use_multi_head,
+            "use_stateful_reranking": v3_state.v3_config.use_stateful_reranking,
+            "use_length_penalty": v3_state.v3_config.use_length_penalty,
+            "bm25_weight": v3_state.v3_config.bm25_weight,
+            "colbert_weight": v3_state.v3_config.colbert_weight,
+            "num_heads": v3_state.v3_config.num_heads,
+            "context_influence": v3_state.v3_config.context_influence,
+            "final_top_k": v3_state.v3_config.final_top_k
+        },
+        "session_info": {
+            "active_sessions": len(v3_state.session_states),
+            "session_ids": list(v3_state.session_states.keys())
+        }
+    }
 
-    attn_res = await query(attn_payload)
-    vec_res = await query(vec_payload)
+@app.post("/api/v3/clear_sessions")
+async def clear_v3_sessions():
+    """清空所有会话状态"""
+    v3_state.session_states.clear()
+    return {"status": "sessions_cleared", "message": "所有会话状态已清空"}
 
-    return {"attention": attn_res, "vector": vec_res}
+@app.get("/api/debug/cache")
+async def debug_cache():
+    """调试缓存状态"""
+    cache_files = []
+    if os.path.exists(VECTOR_DB_DIR):
+        for file in os.listdir(VECTOR_DB_DIR):
+            cache_files.append(file)
+    
+    return {
+        "cache_dir": VECTOR_DB_DIR,
+        "cache_files": cache_files,
+        "index_built": v3_state.index_built,
+        "document_hash": v3_state.document_hash,
+        "chunk_config_hash": v3_state.chunk_config_hash,
+        "num_docs": len(v3_state.documents),
+        "engine_type": "V3 Advanced Zipper Engine"
+    }
 
+@app.post("/api/debug/save")
+async def debug_save():
+    """手动保存当前V3索引"""
+    if not v3_state.index_built:
+        return {"error": "V3索引未构建"}
+    
+    if not v3_state.document_hash:
+        return {"error": "文档哈希未设置"}
+    
+    index_key = v3_state.get_index_key("")
+    v3_state.save_index(index_key)
+    
+    return {"message": f"V3索引已保存: {index_key}"}
+
+# -----------------------------
+# 批量测试接口
+# -----------------------------
+
+@app.post("/api/batch_test")
+async def batch_test(
+    test_file: UploadFile = File(...),
+    v3_config: str = Form("{}"),
+    llm_config: str = Form("{}"),
+    prompt: str = Form(""),
+    include_contexts: bool = Form(False)
+):
+    """批量测试接口"""
+    if not v3_state.index_built:
+        raise HTTPException(status_code=400, detail="尚未上传并构建V3索引")
+    
+    try:
+        # 解析配置
+        v3_config_data = json.loads(v3_config) if v3_config else {}
+        llm_config_data = json.loads(llm_config) if llm_config else {}
+        
+        # 读取测试文件
+        test_content = await test_file.read()
+        test_data = json.loads(test_content.decode('utf-8'))
+        
+        # 获取文件名（不含扩展名）
+        filename = os.path.splitext(test_file.filename)[0]
+        
+        # 执行批量测试
+        results = []
+        total_queries = len(test_data)
+        
+        for i, test_case in enumerate(test_data):
+            logger.info(f"执行测试用例 {i+1}/{total_queries}: {test_case.get('id', 'Unknown')}")
+            
+            # 执行查询
+            query = test_case.get('query', '')
+            if not query:
+                continue
+                
+            try:
+                # 构建查询payload
+                payload = {
+                    "question": query,
+                    "v3_config": v3_config_data,
+                    "llm": llm_config_data,
+                    "prompt": prompt,
+                    "session_id": f"batch_test_{i}"
+                }
+                
+                # 调用V3查询接口
+                query_result = await v3_query(payload)
+                
+                # 构建测试结果
+                test_result = {
+                    "id": test_case.get('id', f"test_{i+1}"),
+                    "category": test_case.get('category', ''),
+                    "difficulty": test_case.get('difficulty', 1),
+                    "query": query,
+                    "expected_answer_keywords": test_case.get('expected_answer_keywords', []),
+                    "ai_answer": query_result.get('answer', ''),
+                    "metrics": query_result.get('metrics', {}),
+                    "session_id": query_result.get('session_id', ''),
+                    "timestamp": time.time()
+                }
+                
+                # 根据用户选择决定是否包含召回调段
+                if include_contexts:
+                    test_result["retrieval_results"] = query_result.get('results', [])
+                else:
+                    # 不包含召回调段，只保存基本信息
+                    test_result["retrieval_results"] = []
+                    # 移除详细的检索信息，只保留基本指标
+                    if "metrics" in test_result:
+                        basic_metrics = {}
+                        for key in ["total_time", "retrieval_time", "generation_time"]:
+                            if key in test_result["metrics"]:
+                                basic_metrics[key] = test_result["metrics"][key]
+                        test_result["metrics"] = basic_metrics
+                
+                results.append(test_result)
+                
+                # 添加延迟避免过快请求
+                if i < total_queries - 1:
+                    time.sleep(0.1)
+                    
+            except Exception as e:
+                logger.error(f"测试用例 {test_case.get('id', 'Unknown')} 执行失败: {e}")
+                test_result = {
+                    "id": test_case.get('id', f"test_{i+1}"),
+                    "category": test_case.get('category', ''),
+                    "difficulty": test_case.get('difficulty', 1),
+                    "query": query,
+                    "expected_answer_keywords": test_case.get('expected_answer_keywords', []),
+                    "ai_answer": f"[执行失败] {e}",
+                    "retrieval_results": [],
+                    "metrics": {},
+                    "session_id": "",
+                    "timestamp": time.time(),
+                    "error": str(e)
+                }
+                results.append(test_result)
+        
+        # 保存测试结果
+        result_filename = f"{filename}_jg.json"
+        result_path = os.path.join("results", result_filename)
+        os.makedirs("results", exist_ok=True)
+        
+        with open(result_path, 'w', encoding='utf-8') as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
+        
+        # 生成测试摘要
+        summary = {
+            "total_tests": total_queries,
+            "successful_tests": len([r for r in results if 'error' not in r]),
+            "failed_tests": len([r for r in results if 'error' in r]),
+            "average_retrieval_time": sum([r.get('metrics', {}).get('retrieval_time', 0) for r in results if 'error' not in r]) / max(1, len([r for r in results if 'error' not in r])),
+            "average_llm_latency": sum([r.get('metrics', {}).get('llm_latency', 0) for r in results if 'error' not in r]) / max(1, len([r for r in results if 'error' not in r])),
+            "test_timestamp": time.time(),
+            "result_file": result_filename,
+            "include_contexts": include_contexts,
+            "contexts_info": "包含召回调段" if include_contexts else "仅包含AI回答，不包含召回调段"
+        }
+        
+        # 计算召回成功统计率
+        successful_results = [r for r in results if 'error' not in r]
+        recall_failures = 0
+        
+        for result in successful_results:
+            ai_answer = result.get('ai_answer', '').lower()
+            # 检查是否包含召回失败的关键字
+            if '无法根据参考上下文回答' in ai_answer or '无法' in ai_answer:
+                recall_failures += 1
+        
+        total_successful = len(successful_results)
+        recall_success_count = total_successful - recall_failures
+        recall_success_rate = (recall_success_count / total_successful * 100) if total_successful > 0 else 0
+        
+        # 更新摘要信息
+        summary.update({
+            "recall_success_count": recall_success_count,
+            "recall_failure_count": recall_failures,
+            "recall_success_rate": round(recall_success_rate, 2),
+            "total_successful_tests": total_successful
+        })
+        
+        # 保存摘要
+        summary_filename = f"{filename}_jg_summary.json"
+        summary_path = os.path.join("results", summary_filename)
+        with open(summary_path, 'w', encoding='utf-8') as f:
+            json.dump(summary, f, ensure_ascii=False, indent=2)
+        
+        return {
+            "success": True,
+            "message": f"批量测试完成，共执行 {total_queries} 个测试用例",
+            "summary": summary,
+            "result_file": result_filename,
+            "download_url": f"/api/download_result/{result_filename}"
+        }
+        
+    except Exception as e:
+        logger.error(f"批量测试失败: {e}")
+        raise HTTPException(status_code=500, detail=f"批量测试失败: {e}")
+
+@app.get("/api/download_result/{filename}")
+async def download_result(filename: str):
+    """下载测试结果文件"""
+    file_path = os.path.join("results", filename)
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    
+    return FileResponse(
+        path=file_path,
+        filename=filename,
+        media_type='application/json'
+    )
+
+@app.get("/api/list_results")
+async def list_results():
+    """列出所有可下载的测试结果文件"""
+    results_dir = "results"
+    if not os.path.exists(results_dir):
+        return {"files": []}
+    
+    files = []
+    for filename in os.listdir(results_dir):
+        if filename.endswith('_jg.json') or filename.endswith('_jg_summary.json'):
+            file_path = os.path.join(results_dir, filename)
+            file_stat = os.stat(file_path)
+            files.append({
+                "filename": filename,
+                "size": file_stat.st_size,
+                "modified": file_stat.st_mtime,
+                "download_url": f"/api/download_result/{filename}"
+            })
+    
+    # 按修改时间排序
+    files.sort(key=lambda x: x['modified'], reverse=True)
+    
+    return {"files": files}
 
 if __name__ == "__main__":
     import uvicorn

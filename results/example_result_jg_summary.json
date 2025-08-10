@@ -1,0 +1,13 @@
+{
+  "total_tests": 4,
+  "successful_tests": 4,
+  "failed_tests": 0,
+  "average_retrieval_time": 0.122,
+  "average_llm_latency": 1.181,
+  "test_timestamp": 1703123457.789,
+  "result_file": "example_result_jg.json",
+  "recall_success_count": 3,
+  "recall_failure_count": 1,
+  "recall_success_rate": 75.0,
+  "total_successful_tests": 4
+} 

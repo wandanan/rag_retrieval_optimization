@@ -1,0 +1,58 @@
+[
+  {
+    "id": "A01",
+    "category": "事实检索与细节定位",
+    "difficulty": 1,
+    "query": "易书元是在哪条河上坐船的？",
+    "expected_answer_keywords": ["堵河"]
+  },
+  {
+    "id": "A02",
+    "category": "事实检索与细节定位",
+    "difficulty": 1,
+    "query": "划船的大爷认为易书元是什么职业？",
+    "expected_answer_keywords": ["网红"]
+  },
+  {
+    "id": "A03",
+    "category": "事实检索与细节定位",
+    "difficulty": 1,
+    "query": "那群恶人想要捕捉的异兽叫什么名字？",
+    "expected_answer_keywords": ["雪蟒"]
+  },
+  {
+    "id": "A04",
+    "category": "事实检索与细节定位",
+    "difficulty": 1,
+    "query": "在废弃驿站里，是谁给易书元盛汤和馒头？",
+    "expected_answer_keywords": ["阿狗"]
+  },
+  {
+    "id": "A05",
+    "category": "事实检索与细节定位",
+    "difficulty": 2,
+    "query": "易书元在船上遇到了什么危险？",
+    "expected_answer_keywords": ["恶人", "捕捉", "异兽"]
+  },
+  {
+    "id": "A06",
+    "category": "情节理解与推理",
+    "difficulty": 2,
+    "query": "为什么易书元会选择在夜晚坐船？",
+    "expected_answer_keywords": ["避开", "白天", "危险"]
+  },
+  {
+    "id": "A07",
+    "category": "情节理解与推理",
+    "difficulty": 3,
+    "query": "易书元在驿站中的行为表现了他什么样的性格特点？",
+    "expected_answer_keywords": ["谨慎", "机智", "观察力"]
+  },
+  {
+    "id": "A08",
+    "category": "情节理解与推理",
+    "difficulty": 3,
+    "query": "整个故事中易书元面临的主要挑战是什么？",
+    "expected_answer_keywords": ["生存", "逃脱", "恶人", "异兽"]
+  }
+]

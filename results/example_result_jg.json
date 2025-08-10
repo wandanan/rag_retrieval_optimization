@@ -1,0 +1,90 @@
+[
+  {
+    "id": "A01",
+    "category": "事实检索与细节定位",
+    "difficulty": 1,
+    "query": "易书元是在哪条河上坐船的？",
+    "expected_answer_keywords": ["堵河"],
+    "ai_answer": "根据参考上下文，易书元是在堵河上坐船的。",
+    "retrieval_results": [
+      {
+        "doc_id": 1,
+        "score": 0.95,
+        "content": "易书元在堵河上坐船，准备前往阔南山。"
+      }
+    ],
+    "metrics": {
+      "retrieval_time": 0.125,
+      "llm_latency": 1.234,
+      "total_latency": 1.359
+    },
+    "session_id": "batch_test_0",
+    "timestamp": 1703123456.789
+  },
+  {
+    "id": "A02",
+    "category": "事实检索与细节定位",
+    "difficulty": 1,
+    "query": "划船的大爷认为易书元是什么职业？",
+    "expected_answer_keywords": ["网红"],
+    "ai_answer": "根据参考上下文，划船的大爷认为易书元是网红。",
+    "retrieval_results": [
+      {
+        "doc_id": 2,
+        "score": 0.92,
+        "content": "划船的大爷看到易书元后，认为他是个网红。"
+      }
+    ],
+    "metrics": {
+      "retrieval_time": 0.118,
+      "llm_latency": 1.156,
+      "total_latency": 1.274
+    },
+    "session_id": "batch_test_1",
+    "timestamp": 1703123457.123
+  },
+  {
+    "id": "A03",
+    "category": "事实检索与细节定位",
+    "difficulty": 1,
+    "query": "那群恶人想要捕捉的异兽叫什么名字？",
+    "expected_answer_keywords": ["雪蟒"],
+    "ai_answer": "无法根据参考上下文回答。",
+    "retrieval_results": [
+      {
+        "doc_id": 3,
+        "score": 0.45,
+        "content": "易书元在船上遇到了危险。"
+      }
+    ],
+    "metrics": {
+      "retrieval_time": 0.134,
+      "llm_latency": 0.987,
+      "total_latency": 1.121
+    },
+    "session_id": "batch_test_2",
+    "timestamp": 1703123457.456
+  },
+  {
+    "id": "A04",
+    "category": "事实检索与细节定位",
+    "difficulty": 1,
+    "query": "在废弃驿站里，是谁给易书元盛汤和馒头？",
+    "expected_answer_keywords": ["阿狗"],
+    "ai_answer": "根据参考上下文，在废弃驿站里是阿狗给易书元盛汤和馒头。",
+    "retrieval_results": [
+      {
+        "doc_id": 4,
+        "score": 0.88,
+        "content": "阿狗热情地给易书元盛了一碗热汤和几个馒头。"
+      }
+    ],
+    "metrics": {
+      "retrieval_time": 0.112,
+      "llm_latency": 1.345,
+      "total_latency": 1.457
+    },
+    "session_id": "batch_test_3",
+    "timestamp": 1703123457.789
+  }
+] 

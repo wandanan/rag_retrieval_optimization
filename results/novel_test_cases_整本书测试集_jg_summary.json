@@ -1,0 +1,15 @@
+{ "测试范围": "整本书",
+  "total_tests": 15,
+  "successful_tests": 15,
+  "failed_tests": 0,
+  "average_retrieval_time": 1.3656220118204752,
+  "average_llm_latency": 0.0,
+  "test_timestamp": 1754814725.624146,
+  "result_file": "novel_test_cases_整本书测试集_jg.json",
+  "include_contexts": false,
+  "contexts_info": "仅包含AI回答，不包含召回调段",
+  "recall_success_count": 12,
+  "recall_failure_count": 3,
+  "recall_success_rate": 80.0,
+  "total_successful_tests": 15
+}
