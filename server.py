@@ -81,7 +81,10 @@ class V3IndexState:
         self.overlap: int = 100
         
         # V3引擎配置
-        self.v3_config: ZipperV3Config = ZipperV3Config()
+        self.v3_config: ZipperV3Config = ZipperV3Config(
+            encoder_backend="hf",  # 强制使用HF
+            hf_model_name="BAAI/bge-small-zh-v1.5"  # 默认HF模型
+        )
         
         # 会话状态管理
         self.session_states: Dict[str, ZipperV3State] = {}
@@ -117,8 +120,7 @@ class V3IndexState:
         """获取V3引擎配置的哈希值"""
         config_str = (
             f"{self.v3_config.encoder_backend}_"
-            f"{self.v3_config.bge_model_path}_"
-            f"{self.v3_config.hf_model_name or 'none'}_"
+            f"{self.v3_config.hf_model_name}_"
             f"{self.v3_config.bm25_weight}_"
             f"{self.v3_config.colbert_weight}_"
             f"{self.v3_config.num_heads}_"
@@ -330,7 +332,8 @@ async def clear():
 async def upload(
     file: UploadFile = File(...),
     chunk_size: int = Form(500),
-    overlap: int = Form(100)
+    overlap: int = Form(100),
+    v3_config: str = Form("{}")
 ):
     try:
         raw = await file.read()
@@ -344,6 +347,45 @@ async def upload(
     # 更新配置
     v3_state.chunk_size = chunk_size
     v3_state.overlap = overlap
+
+    # 处理V3引擎配置
+    try:
+        logger.info(f"原始v3_config参数: {v3_config}")
+        v3_config_data = json.loads(v3_config) if v3_config else {}
+        logger.info(f"解析后的V3配置: {v3_config_data}")
+        logger.info(f"配置类型: {type(v3_config_data)}")
+        
+        # 更新V3配置
+        if v3_config_data:
+            v3_state.v3_config = ZipperV3Config(
+                encoder_backend=v3_config_data.get("encoder_backend", "hf"),
+                hf_model_name=v3_config_data.get("hf_model_name", "BAAI/bge-small-zh-v1.5"),
+                embedding_dim=int(v3_config_data.get("embedding_dim", 512)),
+                bm25_weight=float(v3_config_data.get("bm25_weight", 1.0)),
+                colbert_weight=float(v3_config_data.get("colbert_weight", 1.5)),
+                num_heads=int(v3_config_data.get("num_heads", 8)),
+                context_influence=float(v3_config_data.get("context_influence", 0.3)),
+                final_top_k=int(v3_config_data.get("final_top_k", 10)),
+                length_penalty_alpha=float(v3_config_data.get("length_penalty_alpha", 0.05)),
+                context_memory_decay=float(v3_config_data.get("context_memory_decay", 0.8)),
+                bm25_top_n=int(v3_config_data.get("bm25_top_n", 100)),
+                encode_batch_size=int(v3_config_data.get("encode_batch_size", 64)),
+                max_length=int(v3_config_data.get("max_length", 256)),
+                use_hybrid_search=bool(v3_config_data.get("use_hybrid_search", True)),
+                use_multi_head=bool(v3_config_data.get("use_multi_head", True)),
+                use_length_penalty=bool(v3_config_data.get("use_length_penalty", True)),
+                use_stateful_reranking=bool(v3_config_data.get("use_stateful_reranking", True)),
+                precompute_doc_tokens=bool(v3_config_data.get("precompute_doc_tokens", False)),
+                enable_amp_if_beneficial=bool(v3_config_data.get("enable_amp_if_beneficial", True)),
+                use_reranker=bool(v3_config_data.get("use_reranker", True)),
+                reranker_model_name=v3_config_data.get("reranker_model_name", "BAAI/bge-reranker-large"),
+                reranker_top_n=int(v3_config_data.get("reranker_top_n", 50)),
+                reranker_weight=float(v3_config_data.get("reranker_weight", 1.5)),
+                reranker_backend=v3_config_data.get("reranker_backend", "auto")
+            )
+            logger.info(f"V3配置已更新，模型名称: {v3_state.v3_config.hf_model_name}")
+    except Exception as e:
+        logger.warning(f"V3配置解析失败，使用默认配置: {e}")
 
     # 计算文档和配置哈希
     doc_hash = v3_state.get_document_hash(text)
@@ -379,20 +421,29 @@ async def upload(
     v3_state.document_hash = doc_hash
     v3_state.chunk_config_hash = config_hash
     
-    # 初始化V3引擎并构建索引
-    v3_state.v3_engine = AdvancedZipperQueryEngineV3(v3_state.v3_config)
-    v3_state.v3_engine.build_document_index(documents)
-    v3_state.index_built = True
-    
-    # 保存索引到磁盘
-    v3_state.save_index(index_key)
+    try:
+        # 初始化V3引擎并构建索引
+        logger.info("初始化V3引擎...")
+        v3_state.v3_engine = AdvancedZipperQueryEngineV3(v3_state.v3_config)
+        logger.info("构建文档索引...")
+        v3_state.v3_engine.build_document_index(documents)
+        v3_state.index_built = True
+        
+        # 保存索引到磁盘
+        logger.info("保存索引到磁盘...")
+        v3_state.save_index(index_key)
 
-    return {
-        "message": "V3索引已构建并保存",
-        "num_docs": len(documents),
-        "cached": False,
-        "index_key": index_key
-    }
+        return {
+            "message": "V3索引已构建并保存",
+            "num_docs": len(documents),
+            "cached": False,
+            "index_key": index_key
+        }
+    except Exception as e:
+        logger.error(f"V3引擎初始化失败: {e}")
+        import traceback
+        logger.error(f"详细错误信息: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"V3引擎初始化失败: {str(e)}")
 
 @app.post("/api/v3_query")
 async def v3_query(payload: Dict[str, Any]):
@@ -410,9 +461,8 @@ async def v3_query(payload: Dict[str, Any]):
     # 检查是否需要重新初始化引擎（配置变更）
     current_config_hash = v3_state.get_v3_config_hash()
     new_config = ZipperV3Config(
-        encoder_backend=v3_config_data.get("encoder_backend", "bge"),
-        bge_model_path=v3_config_data.get("bge_model_path", "BAAI/bge-small-zh-v1.5"),
-        hf_model_name=v3_config_data.get("hf_model_name"),
+        encoder_backend="hf",  # 强制使用HF
+        hf_model_name=v3_config_data.get("hf_model_name") or "BAAI/bge-small-zh-v1.5",
         embedding_dim=int(v3_config_data.get("embedding_dim", 512)),
         bm25_weight=float(v3_config_data.get("bm25_weight", 1.0)),
         colbert_weight=float(v3_config_data.get("colbert_weight", 1.5)),
@@ -441,7 +491,7 @@ async def v3_query(payload: Dict[str, Any]):
     )
     
     new_config_hash = hashlib.md5(
-        f"{new_config.encoder_backend}_{new_config.bge_model_path}_{new_config.hf_model_name or 'none'}_"
+        f"{new_config.encoder_backend}_{new_config.hf_model_name}_"
         f"{new_config.embedding_dim}_{new_config.bm25_weight}_{new_config.colbert_weight}_{new_config.num_heads}_"
         f"{new_config.context_influence}_{new_config.final_top_k}_"
         f"{new_config.length_penalty_alpha}_{new_config.context_memory_decay}_"

@@ -95,7 +95,7 @@ http://localhost:8000
 优先级顺序：
 1. `BAAI/bge-large-zh-v1.5`（需要token）
 2. `BAAI/bge-base-zh-v1.5`（需要token）
-3. `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`（公开模型）
+3. `BAAI/bge-small-zh-v1.5`（公开模型）
 
 ### 3. 注意力机制优化
 

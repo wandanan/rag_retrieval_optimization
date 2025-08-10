@@ -2,77 +2,96 @@
 向量检索模块
 """
 
-import torch
-import numpy as np
-import faiss
-from typing import List, Tuple, Dict, Optional
-import logging
 import os
+import pickle
+import logging
+import numpy as np
+import torch
+from typing import List, Tuple, Optional, Dict
+import time
 
-# 新增：可选 Ollama 客户端
+# 依赖检查
 try:
-    import requests  # type: ignore
+    from transformers import AutoTokenizer, AutoModel
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
+    AutoTokenizer = None
+    AutoModel = None
+
+try:
+    import requests
     REQUESTS_AVAILABLE = True
-except Exception:
-    requests = None  # type: ignore
+except ImportError:
     REQUESTS_AVAILABLE = False
+
+try:
+    import faiss
+    FAISS_AVAILABLE = True
+except ImportError:
+    FAISS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
 class VectorRetriever:
-    """向量检索器（支持 Sentence-Transformers 与 Ollama Embeddings）"""
+    """向量检索引擎 - 使用HuggingFace transformers或Ollama"""
     
-    def __init__(self, model_name: str = 'sentence-transformers/all-MiniLM-L6-v2', 
+    def __init__(self, model_name: str = 'BAAI/bge-small-zh-v1.5', 
                  device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
-                 backend: str = 'sentence-transformers',
+                 backend: str = 'transformers',  # 改为transformers
                  remote_endpoint: str = 'http://localhost:11434',
                  query_instruction_for_retrieval: Optional[str] = None,
                  hf_token: Optional[str] = None):
+        """
+        初始化向量检索引擎
+        
+        Args:
+            model_name: 模型名称（HF模型名或Ollama模型名）
+            device: 计算设备
+            backend: 后端类型 ('transformers' 或 'ollama')
+            remote_endpoint: Ollama服务端点
+            query_instruction_for_retrieval: BGE查询指令
+            hf_token: HuggingFace认证token
+        """
         self.model_name = model_name
         self.device = device
-        self.backend = backend  # 'sentence-transformers' | 'ollama'
-        self.remote_endpoint = remote_endpoint.rstrip('/')
-        
-        # BGE 查询指令（仅对encode_query生效）
-        if query_instruction_for_retrieval is not None:
-            self.query_instruction_for_retrieval = query_instruction_for_retrieval
-        else:
-            # 自动为中文BGE模型注入推荐指令
-            if isinstance(model_name, str) and 'bge' in model_name.lower() and ('zh' in model_name.lower() or 'chinese' in model_name.lower()):
-                self.query_instruction_for_retrieval = "为这个句子生成表示以用于检索相关文章："
-            else:
-                self.query_instruction_for_retrieval = None
-
-        # HF鉴权token：参数优先，其次环境变量
-        self.hf_token = hf_token or os.environ.get('HUGGINGFACE_HUB_TOKEN') or os.environ.get('HF_TOKEN')
+        self.backend = backend
+        self.remote_endpoint = remote_endpoint
+        self.query_instruction_for_retrieval = query_instruction_for_retrieval
+        self.hf_token = hf_token
         
         # 设置缓存目录
         cache_dir = os.environ.get('TRANSFORMERS_CACHE', os.path.join(os.path.dirname(__file__), '..', 'model_cache'))
         os.makedirs(cache_dir, exist_ok=True)
         
         self.encoder = None
-        if self.backend == 'sentence-transformers':
-            from sentence_transformers import SentenceTransformer  # 延迟导入
-            # 传入鉴权token（私有/受限模型需要）
+        if self.backend == 'transformers':
+            if not TRANSFORMERS_AVAILABLE:
+                raise ImportError("transformers未安装。请运行: pip install transformers")
+            
             try:
-                logger.info(f"加载模型: {model_name} 到缓存目录: {cache_dir}")
-                self.encoder = SentenceTransformer(
+                logger.info(f"加载HF模型: {model_name} 到缓存目录: {cache_dir}")
+                self.tokenizer = AutoTokenizer.from_pretrained(
                     model_name, 
-                    device=device, 
-                    use_auth_token=self.hf_token,
-                    cache_folder=cache_dir
+                    cache_dir=cache_dir,
+                    token=hf_token,
+                    trust_remote_code=True
                 )
-                logger.info(f"模型加载成功: {model_name}")
-            except TypeError:
-                # 某些版本不支持use_auth_token参数，回退不传该参数
-                self.encoder = SentenceTransformer(
-                    model_name, 
-                    device=device,
-                    cache_folder=cache_dir
+                self.model = AutoModel.from_pretrained(
+                    model_name,
+                    cache_dir=cache_dir,
+                    token=hf_token,
+                    trust_remote_code=True,
+                    device_map=device if device != 'cpu' else None
                 )
-                logger.info(f"模型加载成功（无认证）: {model_name}")
-            if self.query_instruction_for_retrieval:
-                logger.info(f"BGE查询指令已启用: {self.query_instruction_for_retrieval}")
+                if device == 'cpu':
+                    self.model = self.model.to(device)
+                self.model.eval()
+                logger.info(f"HF模型加载成功: {model_name}")
+            except Exception as e:
+                logger.error(f"加载HF模型失败: {e}")
+                raise
+                
         elif self.backend == 'ollama':
             if not REQUESTS_AVAILABLE:
                 raise RuntimeError("requests 未安装，无法使用 Ollama 嵌入后端")
@@ -80,12 +99,58 @@ class VectorRetriever:
             raise ValueError(f"未知后端: {self.backend}")
         
         # FAISS索引
+        if not FAISS_AVAILABLE:
+            raise ImportError("faiss未安装。请运行: pip install faiss-cpu 或 pip install faiss-gpu")
+            
         self.index = None
         self.documents: List[str] = []
         self.doc_ids: List[str] = []
         self.embeddings: Optional[np.ndarray] = None
         
         logger.info(f"Vector retriever initialized with backend={self.backend}, model={model_name}")
+
+    def _encode_transformers(self, texts: List[str]) -> np.ndarray:
+        """使用transformers库生成嵌入"""
+        if self.backend != 'transformers':
+            raise ValueError("当前后端不是transformers")
+            
+        embeddings = []
+        batch_size = 32
+        
+        with torch.no_grad():
+            for i in range(0, len(texts), batch_size):
+                batch_texts = texts[i:i + batch_size]
+                
+                # 对BGE模型添加查询指令
+                if self.query_instruction_for_retrieval:
+                    batch_texts = [f"{self.query_instruction_for_retrieval}{text}" for text in batch_texts]
+                
+                # 编码
+                inputs = self.tokenizer(
+                    batch_texts, 
+                    padding=True, 
+                    truncation=True, 
+                    max_length=512, 
+                    return_tensors="pt"
+                ).to(self.device)
+                
+                outputs = self.model(**inputs)
+                
+                # 平均池化
+                attention_mask = inputs['attention_mask']
+                embeddings_batch = self._mean_pool(outputs.last_hidden_state, attention_mask)
+                
+                # L2归一化
+                embeddings_batch = torch.nn.functional.normalize(embeddings_batch, p=2, dim=1)
+                
+                embeddings.append(embeddings_batch.cpu().numpy())
+        
+        return np.vstack(embeddings).astype(np.float32)
+    
+    def _mean_pool(self, last_hidden_state: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+        """平均池化"""
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden_state.size()).float()
+        return torch.sum(last_hidden_state * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
 
     def _encode_ollama(self, texts: List[str]) -> np.ndarray:
         """通过 Ollama /api/embed 生成嵌入"""
@@ -108,9 +173,8 @@ class VectorRetriever:
 
     def embed_texts(self, texts: List[str]) -> np.ndarray:
         """公共批量嵌入接口，供上层进行token级编码"""
-        if self.backend == 'sentence-transformers':
-            embeddings = self.encoder.encode(texts, convert_to_numpy=True, batch_size=64, show_progress_bar=False)
-            return embeddings.astype(np.float32)
+        if self.backend == 'transformers':
+            return self._encode_transformers(texts)
         elif self.backend == 'ollama':
             return self._encode_ollama(texts).astype(np.float32)
         else:
@@ -119,10 +183,8 @@ class VectorRetriever:
     def encode_documents(self, documents: List[str]) -> np.ndarray:
         """编码文档"""
         logger.info(f"Encoding {len(documents)} documents via {self.backend}...")
-        if self.backend == 'sentence-transformers':
-            embeddings = self.encoder.encode(documents, show_progress_bar=True, 
-                                           batch_size=32, convert_to_numpy=True)
-            return embeddings.astype(np.float32)
+        if self.backend == 'transformers':
+            return self._encode_transformers(documents)
         elif self.backend == 'ollama':
             embeddings = self._encode_ollama(documents)
             return embeddings.astype(np.float32)
@@ -131,10 +193,10 @@ class VectorRetriever:
     
     def encode_query(self, query: str) -> np.ndarray:
         """编码查询（对BGE模型自动添加检索指令）"""
-        if self.backend == 'sentence-transformers':
+        if self.backend == 'transformers':
             if self.query_instruction_for_retrieval:
                 query = f"{self.query_instruction_for_retrieval}{query}"
-            embedding = self.encoder.encode([query], convert_to_numpy=True)
+            embedding = self._encode_transformers([query])
             return embedding[0].astype(np.float32)
         elif self.backend == 'ollama':
             embedding = self._encode_ollama([query])
@@ -281,9 +343,9 @@ class VectorRetriever:
 class HybridVectorRetriever:
     """混合向量检索器（支持多种相似度计算）"""
     
-    def __init__(self, model_name: str = 'sentence-transformers/all-MiniLM-L6-v2',
+    def __init__(self, model_name: str = 'BAAI/bge-small-zh-v1.5',
                  device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
-                 backend: str = 'sentence-transformers',
+                 backend: str = 'transformers',  # 改为transformers
                  remote_endpoint: str = 'http://localhost:11434',
                  query_instruction_for_retrieval: Optional[str] = None,
                  hf_token: Optional[str] = None):

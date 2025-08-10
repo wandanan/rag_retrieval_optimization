@@ -205,25 +205,22 @@ def main():
     logger.info("="*80)
     logger.info("=== V3引擎在Multi-CPR上的最终性能评估脚本 ===")
     
-    # --- 在这里配置你的实验策略 ---
-    # 这是一套推荐的、在之前测试中表现出色的“全功能”配置
+    # 创建V3引擎配置
     config = ZipperV3Config(
-        bge_model_path="BAAI/bge-small-zh-v1.5",  # 修复：使用正确的模型标识符
+        encoder_backend="hf",  # 强制使用HF
+        hf_model_name="BAAI/bge-small-zh-v1.5",  # HF模型名称
         embedding_dim=512,
-        encoder_backend="bge",
-        hf_model_name=None,
-        # 其它策略保持一致
-        use_hybrid_search=True,
         bm25_weight=1.0,
         colbert_weight=1.5,
-        use_multi_head=True,
         num_heads=8,
-        use_length_penalty=True,
-        use_stateful_reranking=True,
         context_influence=0.3,
-        # --- 全量预编码与AMP自适应 ---
-        precompute_doc_tokens=False,
-        enable_amp_if_beneficial=True
+        final_top_k=10,
+        # 重排序配置
+        use_reranker=True,
+        reranker_model_name="BAAI/bge-reranker-large",
+        reranker_top_n=50,
+        reranker_weight=1.5,
+        reranker_backend="auto"
     )
     
     engine = AdvancedZipperQueryEngineV3(config)

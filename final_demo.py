@@ -524,14 +524,14 @@ class FinalHybridSystem:
                 self.vector_retriever = VectorRetriever(
                     model_name='BAAI/bge-large-zh-v1.5',
                     device='cuda' if torch.cuda.is_available() else 'cpu',
-                    backend='sentence-transformers',
+                    backend='transformers',  # 改为transformers
                     remote_endpoint='http://localhost:11434',
                     query_instruction_for_retrieval='为这个句子生成表示以用于检索相关文章：',
                     hf_token=os.environ.get('HUGGINGFACE_HUB_TOKEN') or os.environ.get('HF_TOKEN')
                 )
                 self.vector_retriever.build_index(documents)
                 self.use_vector = True
-                backend_name = 'Ollama' if getattr(self.vector_retriever, 'backend', '') == 'ollama' else 'SentenceTransformer'
+                backend_name = 'Ollama' if getattr(self.vector_retriever, 'backend', '') == 'ollama' else 'Transformers'
                 logger.info(f"向量检索已启用（{backend_name} + FAISS）")
                 # 将语义编码器注入注意力模块（实现通用的嵌入语义匹配）
                 self.attention_retriever.set_semantic_embedder(self.vector_retriever)

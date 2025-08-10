@@ -16,7 +16,7 @@ class AttentionRetrievalConfig:
     
     # 向量检索配置
     VECTOR_CONFIG = {
-        'embedding_model': 'sentence-transformers/all-MiniLM-L6-v2',  # 向量编码模型
+        'embedding_model': 'BAAI/bge-small-zh-v1.5',  # 向量编码模型
         'top_k_candidates': 1000,  # 向量检索返回的候选数量
         'similarity_threshold': 0.3,  # 相似度阈值
         'index_type': 'faiss',     # 索引类型

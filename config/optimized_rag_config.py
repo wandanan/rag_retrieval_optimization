@@ -34,12 +34,12 @@ VECTOR_RETRIEVAL_CONFIG = {
     "chinese_models": [
         "BAAI/bge-large-zh-v1.5",      # 中文BGE大模型（需要token）
         "BAAI/bge-base-zh-v1.5",       # 中文BGE基础模型（需要token）
-        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",  # 多语言模型
+        "BAAI/bge-small-zh-v1.5",      # 中文BGE小模型
     ],
     # 英文模型作为备选
     "english_models": [
-        "sentence-transformers/all-MiniLM-L6-v2",
-        "sentence-transformers/all-mpnet-base-v2",
+        "BAAI/bge-large-en-v1.5",      # 英文BGE大模型
+        "BAAI/bge-base-en-v1.5",       # 英文BGE基础模型
     ],
     # 检索参数
     "search_params": {

@@ -14,25 +14,22 @@ def demo_reranker():
     print("🚀 重排序功能演示")
     print("=" * 50)
     
-    # 1. 创建配置
+    # 创建V3引擎配置
     config = ZipperV3Config(
-        # 基础配置
-        bge_model_path="BAAI/bge-small-zh-v1.5",  # 修复：使用正确的模型标识符
-        bm25_top_n=100,  # 扩大初步召回
+        encoder_backend="hf",  # 强制使用HF
+        hf_model_name="BAAI/bge-small-zh-v1.5",  # HF模型名称
+        embedding_dim=512,
+        bm25_weight=1.0,
+        colbert_weight=1.5,
+        num_heads=8,
+        context_influence=0.3,
         final_top_k=10,
-        
         # 重排序配置
         use_reranker=True,
         reranker_model_name="BAAI/bge-reranker-large",
-        reranker_top_n=50,  # 对前50个文档进行重排序
-        reranker_weight=1.5,  # 重排序分数权重
-        
-        # 其他优化配置
-        use_hybrid_search=True,
-        bm25_weight=1.0,
-        colbert_weight=1.0,
-        use_multi_head=True,
-        num_heads=8
+        reranker_top_n=50,
+        reranker_weight=1.5,
+        reranker_backend="auto"
     )
     
     print(f"✅ 配置创建完成")

@@ -1,0 +1,15 @@
+{
+  "total_tests": 48,
+  "successful_tests": 48,
+  "failed_tests": 0,
+  "average_retrieval_time": 49.58399064838886,
+  "average_llm_latency": 0.0,
+  "test_timestamp": 1754830266.7833009,
+  "result_file": "novel_test_cases_整本书测试集 copy_jg.json",
+  "include_contexts": false,
+  "contexts_info": "仅包含AI回答，不包含召回调段",
+  "recall_success_count": 36,
+  "recall_failure_count": 12,
+  "recall_success_rate": 75.0,
+  "total_successful_tests": 48
+}

@@ -98,8 +98,8 @@ def test_vector_retriever():
         
         # 尝试不同的模型
         model_options = [
-            'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',  # 多语言模型
-            'sentence-transformers/all-MiniLM-L6-v2',  # 英文模型
+            'BAAI/bge-small-zh-v1.5',  # 中文BGE模型
+            'BAAI/bge-base-zh-v1.5',   # 中文BGE基础模型
         ]
         
         if hf_token:
@@ -112,7 +112,7 @@ def test_vector_retriever():
                 vector_retriever = VectorRetriever(
                     model_name=model_name,
                     device='cuda' if torch.cuda.is_available() else 'cpu',
-                    backend='sentence-transformers',
+                    backend='transformers',
                     hf_token=hf_token
                 )
                 logger.info(f"成功加载模型: {model_name}")

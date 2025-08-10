@@ -19,7 +19,7 @@ class HybridRetrievalSystem:
     """混合检索系统 - 设想1的实现"""
     
     def __init__(self, 
-                 vector_model_name: str = 'sentence-transformers/all-MiniLM-L6-v2',
+                 vector_model_name: str = 'BAAI/bge-small-zh-v1.5',
                  attention_model_name: str = 'bert-base-uncased',
                  device: str = 'cuda' if torch.cuda.is_available() else 'cpu'):
         

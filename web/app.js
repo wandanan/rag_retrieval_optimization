@@ -1,6 +1,7 @@
 // 全局状态
 let isIndexBuilt = false;
 let history = [];
+let modelStatus = 'online'; // 新增：模型状态管理
 
 // 配置项列表
 const CONFIG_KEYS = {
@@ -35,10 +36,8 @@ const DEFAULT_CONFIG = {
 
 // V3引擎默认配置
 const V3_DEFAULT_CONFIG = {
-  'encoder_backend': 'bge',
-  // 修复：从错误的本地缓存路径改为正确的模型标识符
-  'bge_model_path': 'BAAI/bge-small-zh-v1.5',  // 修复这一行
-  'hf_model_name': '',
+  'encoder_backend': 'hf',  // 固定为HF
+  'hf_model_name': 'BAAI/bge-small-zh-v1.5',   // HF模型名称
   'embedding_dim': '512',
   'bm25_weight': '1.0',
   'colbert_weight': '1.5',
@@ -64,6 +63,42 @@ const V3_DEFAULT_CONFIG = {
   'reranker_weight': '1.5',
   'reranker_backend': 'auto'
 };
+
+// 模型状态管理
+function updateModelStatus(status) {
+  modelStatus = status;
+  const statusDot = document.querySelector('.status-dot');
+  const statusText = document.querySelector('.status-text');
+  
+  if (statusDot && statusText) {
+    statusDot.className = `status-dot ${status}`;
+    
+    switch (status) {
+      case 'online':
+        statusText.textContent = '在线模型模式';
+        break;
+      case 'loading':
+        statusText.textContent = '模型加载中...';
+        break;
+      case 'offline':
+        statusText.textContent = '模型离线';
+        break;
+    }
+  }
+}
+
+// 显示优化提示
+function showOptimizationTip(message, type = 'info') {
+  const tip = document.createElement('div');
+  tip.className = `notification ${type}`;
+  tip.textContent = message;
+  
+  document.body.appendChild(tip);
+  
+  setTimeout(() => {
+    tip.remove();
+  }, 5000);
+}
 
 // DOM 元素
 const elements = {
@@ -120,7 +155,7 @@ function saveConfig() {
   
   // 保存V3引擎配置
   const v3ConfigElements = [
-    'encoder_backend', 'bge_model_path', 'hf_model_name', 'embedding_dim',
+    'encoder_backend', 'hf_model_name', 'embedding_dim',
     'bm25_weight', 'colbert_weight', 'num_heads', 'context_influence',
     'length_penalty_alpha', 'context_memory_decay', 'bm25_top_n', 'final_top_k',
     'encode_batch_size', 'max_length', 'use_hybrid_search', 'use_multi_head',
@@ -172,6 +207,20 @@ function loadConfig() {
           element.value = DEFAULT_CONFIG[key];
         }
       });
+      
+      // 同时设置V3引擎的默认配置
+      Object.keys(V3_DEFAULT_CONFIG).forEach(key => {
+        const element = document.getElementById(key);
+        if (element) {
+          if (element.type === 'checkbox') {
+            element.checked = V3_DEFAULT_CONFIG[key];
+          } else {
+            element.value = V3_DEFAULT_CONFIG[key];
+          }
+        }
+      });
+      
+      console.log('V3引擎默认配置已设置');
     }
   } catch (error) {
     console.warn('恢复配置失败:', error);
@@ -180,6 +229,18 @@ function loadConfig() {
       const element = document.getElementById(key);
       if (element) {
         element.value = DEFAULT_CONFIG[key];
+      }
+    });
+    
+    // 同时设置V3引擎的默认配置
+    Object.keys(V3_DEFAULT_CONFIG).forEach(key => {
+      const element = document.getElementById(key);
+      if (element) {
+        if (element.type === 'checkbox') {
+          element.checked = V3_DEFAULT_CONFIG[key];
+        } else {
+          element.value = V3_DEFAULT_CONFIG[key];
+        }
       }
     });
   }
@@ -199,10 +260,8 @@ function clearConfig() {
     
     // 重置V3引擎配置到默认值
     const v3Defaults = {
-      'encoder_backend': 'bge',
-      // 修复：从错误的本地缓存路径改为正确的模型标识符
-      'bge_model_path': 'BAAI/bge-small-zh-v1.5',  // 修复这一行
-      'hf_model_name': '',
+      'encoder_backend': 'hf',  // 固定为HF
+      'hf_model_name': 'BAAI/bge-small-zh-v1.5',   // HF模型名称
       'embedding_dim': '512',
       'bm25_weight': '1.0',
       'colbert_weight': '1.5',
@@ -288,15 +347,83 @@ async function uploadFile(e) {
     return;
   }
 
+  // 获取V3引擎配置
+  const encoder_backend = document.getElementById('encoder_backend').value;
+  const hf_model_name = document.getElementById('hf_model_name').value;
+  const embedding_dim = Number(document.getElementById('embedding_dim').value);
+  const bm25_weight = Number(document.getElementById('bm25_weight').value);
+  const colbert_weight = Number(document.getElementById('colbert_weight').value);
+  const num_heads = Number(document.getElementById('num_heads').value);
+  const context_influence = Number(document.getElementById('context_influence').value);
+  const length_penalty_alpha = Number(document.getElementById('length_penalty_alpha').value);
+  const context_memory_decay = Number(document.getElementById('context_memory_decay').value);
+  const bm25_top_n = Number(document.getElementById('bm25_top_n').value);
+  const final_top_k = Number(document.getElementById('final_top_k').value);
+  const encode_batch_size = Number(document.getElementById('encode_batch_size').value);
+  const max_length = Number(document.getElementById('max_length').value);
+  
+  // 获取重排序配置
+  const use_reranker = document.getElementById('use_reranker').checked;
+  const reranker_model_name = document.getElementById('reranker_model_name').value;
+  const reranker_top_n = Number(document.getElementById('reranker_top_n').value);
+  const reranker_weight = Number(document.getElementById('reranker_weight').value);
+  const reranker_backend = document.getElementById('reranker_backend').value;
+  
+  // 获取功能开关配置
+  const use_hybrid_search = document.getElementById('use_hybrid_search').checked;
+  const use_multi_head = document.getElementById('use_multi_head').checked;
+  const use_length_penalty = document.getElementById('use_length_penalty').checked;
+  const use_stateful_reranking = document.getElementById('use_stateful_reranking').checked;
+  const precompute_doc_tokens = document.getElementById('precompute_doc_tokens').checked;
+  const enable_amp_if_beneficial = document.getElementById('enable_amp_if_beneficial').checked;
+
   const formData = new FormData();
   formData.append('file', elements.fileInput.files[0]);
   formData.append('parent_chunk_size', document.getElementById('parent_chunk_size').value || '1000');
   formData.append('parent_overlap', document.getElementById('parent_overlap').value || '200');
   formData.append('sub_chunk_size', document.getElementById('sub_chunk_size').value || '200');
   formData.append('sub_overlap', document.getElementById('sub_overlap').value || '50');
+  
+  // 添加V3引擎配置
+  const v3Config = {
+    encoder_backend,
+    hf_model_name,
+    embedding_dim,
+    bm25_weight,
+    colbert_weight,
+    num_heads,
+    context_influence,
+    length_penalty_alpha,
+    context_memory_decay,
+    bm25_top_n,
+    final_top_k,
+    encode_batch_size,
+    max_length,
+    use_reranker,
+    reranker_model_name,
+    reranker_top_n,
+    reranker_weight,
+    reranker_backend,
+    use_hybrid_search,
+    use_multi_head,
+    use_length_penalty,
+    use_stateful_reranking,
+    precompute_doc_tokens,
+    enable_amp_if_beneficial
+  };
+  
+  // 调试：显示配置信息
+  console.log('上传前的V3配置:', v3Config);
+  console.log('HF模型名称:', hf_model_name);
+  
+  formData.append('v3_config', JSON.stringify(v3Config));
 
   elements.uploadStatus.textContent = '上传中...';
   elements.uploadStatus.className = 'status';
+  
+  // 更新模型状态为加载中
+  updateModelStatus('loading');
+  showOptimizationTip('正在构建索引，首次使用将自动下载模型...', 'info');
 
   try {
     const res = await fetch('/api/upload', { method: 'POST', body: formData });
@@ -311,9 +438,17 @@ async function uploadFile(e) {
     // 更新状态指示器
     updateStatus(elements.v3Status, '就绪', 'success');
     
+    // 恢复模型状态为在线
+    updateModelStatus('online');
+    showOptimizationTip('索引构建完成！系统已优化为使用HuggingFace在线模型', 'success');
+    
   } catch (err) {
     elements.uploadStatus.textContent = `❌ 失败：${err.message}`;
     elements.uploadStatus.className = 'status error';
+    
+    // 更新模型状态为离线
+    updateModelStatus('offline');
+    showOptimizationTip('索引构建失败，请检查网络连接和模型配置', 'error');
   }
 }
 
@@ -370,7 +505,6 @@ async function askQuestion() {
 
   // 获取V3引擎配置
   const encoder_backend = document.getElementById('encoder_backend').value;
-  const bge_model_path = document.getElementById('bge_model_path').value;
   const hf_model_name = document.getElementById('hf_model_name').value;
   const embedding_dim = Number(document.getElementById('embedding_dim').value);
   const bm25_weight = Number(document.getElementById('bm25_weight').value);
@@ -410,17 +544,17 @@ async function askQuestion() {
   setLoading(true);
   updateStatus(elements.v3Status, '处理中...', 'loading');
   
+  // 更新模型状态为加载中
+  updateModelStatus('loading');
+  showOptimizationTip('正在使用V3引擎处理查询，模型推理中...', 'info');
+  
   elements.v3Answer.textContent = '正在生成答案...';
   elements.v3Ctx.innerHTML = '';
   elements.v3Metrics.innerHTML = '';
 
   // 根据编码后端选择性地设置模型配置
   const modelConfig = {};
-  if (encoder_backend === 'bge') {
-    modelConfig.bge_model_path = bge_model_path;
-    modelConfig.hf_model_name = '';
-  } else if (encoder_backend === 'hf') {
-    modelConfig.bge_model_path = '';
+  if (encoder_backend === 'hf') {
     modelConfig.hf_model_name = hf_model_name;
   }
 
@@ -515,6 +649,10 @@ async function askQuestion() {
 
     // 更新状态
     updateStatus(elements.v3Status, '完成', 'success');
+    
+    // 恢复模型状态为在线
+    updateModelStatus('online');
+    showOptimizationTip('查询处理完成！V3引擎表现优异', 'success');
 
     // 添加到历史记录
     addToHistory(question, data);
@@ -524,6 +662,10 @@ async function askQuestion() {
     elements.v3Answer.textContent = errorMsg;
     
     updateStatus(elements.v3Status, '错误', 'error');
+    
+    // 更新模型状态为离线
+    updateModelStatus('offline');
+    showOptimizationTip('查询处理失败，请检查网络连接和模型配置', 'error');
   } finally {
     setLoading(false);
   }
@@ -584,25 +726,22 @@ function handleConfigChange() {
 // 模型输入切换函数
 function toggleModelInputs() {
   const encoderBackend = document.getElementById('encoder_backend').value;
-  const bgeGroup = document.getElementById('bge_model_group');
   const hfGroup = document.getElementById('hf_model_group');
   
-  if (encoderBackend === 'bge') {
-    bgeGroup.style.display = 'block';
-    hfGroup.style.display = 'none';
-    // 清空HF模型名
-    document.getElementById('hf_model_name').value = '';
-  } else {
-    bgeGroup.style.display = 'none';
+  if (encoderBackend === 'hf') {
     hfGroup.style.display = 'block';
-    // 清空BGE模型路径
-    document.getElementById('bge_model_path').value = '';
+  } else {
+    hfGroup.style.display = 'none';
   }
 }
 
 // 页面加载时初始化模型输入显示
 document.addEventListener('DOMContentLoaded', function() {
-  toggleModelInputs();
+  // 强制显示HF模型输入
+  const hfGroup = document.getElementById('hf_model_group');
+  if (hfGroup) {
+    hfGroup.style.display = 'block';
+  }
   
   // 设置重排序模型的默认值
   const rerankerModelInput = document.getElementById('reranker_model_name');
@@ -620,7 +759,8 @@ function applyPreset() {
   
   const presets = {
     balanced: {
-      encoder_backend: 'bge',
+      encoder_backend: 'hf',
+      hf_model_name: 'BAAI/bge-small-zh-v1.5',
       bm25_weight: 1.0,
       colbert_weight: 1.5,
       num_heads: 8,
@@ -639,7 +779,8 @@ function applyPreset() {
       reranker_backend: "auto"
     },
     precision: {
-      encoder_backend: 'bge',
+      encoder_backend: 'hf',
+      hf_model_name: 'BAAI/bge-small-zh-v1.5',
       bm25_weight: 0.8,
       colbert_weight: 2.0,
       num_heads: 12,
@@ -658,7 +799,8 @@ function applyPreset() {
       reranker_backend: "auto"
     },
     speed: {
-      encoder_backend: 'bge',
+      encoder_backend: 'hf',
+      hf_model_name: 'BAAI/bge-small-zh-v1.5',
       bm25_weight: 1.2,
       colbert_weight: 1.0,
       num_heads: 4,
@@ -677,7 +819,8 @@ function applyPreset() {
       reranker_backend: "auto"
     },
     conversational: {
-      encoder_backend: 'bge',
+      encoder_backend: 'hf',
+      hf_model_name: 'BAAI/bge-small-zh-v1.5',
       bm25_weight: 0.9,
       colbert_weight: 1.8,
       num_heads: 10,
@@ -697,6 +840,7 @@ function applyPreset() {
     },
     hf_optimized: {
       encoder_backend: 'hf',
+      hf_model_name: 'BAAI/bge-small-zh-v1.5',
       bm25_weight: 1.1,
       colbert_weight: 1.6,
       num_heads: 6,
@@ -757,7 +901,7 @@ function validateAndShowConfig() {
   const allConfigElements = [
     'parent_chunk_size', 'parent_overlap', 'sub_chunk_size', 'sub_overlap',
     'base_url', 'model', 'api_key', 'prompt',
-    'encoder_backend', 'bge_model_path', 'hf_model_name', 'embedding_dim',
+    'encoder_backend', 'hf_model_name', 'embedding_dim',
     'bm25_weight', 'colbert_weight', 'num_heads', 'context_influence',
     'length_penalty_alpha', 'context_memory_decay', 'bm25_top_n', 'final_top_k',
     'encode_batch_size', 'max_length', 'use_hybrid_search', 'use_multi_head',
@@ -780,9 +924,7 @@ function validateAndShowConfig() {
   
   // 验证模型配置
   const encoderBackend = config.encoder_backend;
-  if (encoderBackend === 'bge' && !config.bge_model_path.trim()) {
-    errors.push('❌ BGE模型路径不能为空');
-  } else if (encoderBackend === 'hf' && !config.hf_model_name.trim()) {
+  if (encoderBackend === 'hf' && !config.hf_model_name.trim()) {
     errors.push('❌ HF模型名不能为空');
   }
   
@@ -882,9 +1024,8 @@ async function handleBatchTest(e) {
     
     // 获取当前配置
     const v3Config = {
-      encoder_backend: document.getElementById('encoder_backend')?.value || 'bge',
-      bge_model_path: document.getElementById('bge_model_path')?.value || '',
-      hf_model_name: document.getElementById('hf_model_name')?.value || '',
+      encoder_backend: document.getElementById('encoder_backend')?.value || 'hf',
+      hf_model_name: document.getElementById('hf_model_name')?.value || 'BAAI/bge-small-zh-v1.5',
       embedding_dim: parseInt(document.getElementById('embedding_dim')?.value || '512'),
       bm25_weight: parseFloat(document.getElementById('bm25_weight')?.value || '1.0'),
       colbert_weight: parseFloat(document.getElementById('colbert_weight')?.value || '1.5'),

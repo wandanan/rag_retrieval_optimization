@@ -1,10 +1,10 @@
-{ "测试范围": "整本书",
+{
   "total_tests": 15,
   "successful_tests": 15,
   "failed_tests": 0,
-  "average_retrieval_time": 1.3656220118204752,
+  "average_retrieval_time": 48.230434544881184,
   "average_llm_latency": 0.0,
-  "test_timestamp": 1754814725.624146,
+  "test_timestamp": 1754821269.485294,
   "result_file": "novel_test_cases_整本书测试集_jg.json",
   "include_contexts": false,
   "contexts_info": "仅包含AI回答，不包含召回调段",

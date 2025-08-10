@@ -17,9 +17,8 @@ V3_ENGINE_PRESETS = {
         name="平衡模式",
         description="BM25和ColBERT权重平衡，适合一般用途",
         config={
-            "encoder_backend": "bge",
-            "bge_model_path": "",
-            "hf_model_name": "",
+            "encoder_backend": "hf",
+            "hf_model_name": "BAAI/bge-small-zh-v1.5",
             "bm25_weight": 1.0,
             "colbert_weight": 1.0,
             "num_heads": 8,
@@ -42,9 +41,8 @@ V3_ENGINE_PRESETS = {
         name="精确模式",
         description="高ColBERT权重，适合需要高精度的场景",
         config={
-            "encoder_backend": "bge",
-            "bge_model_path": "",
-            "hf_model_name": "",
+            "encoder_backend": "hf",
+            "hf_model_name": "BAAI/bge-small-zh-v1.5",
             "bm25_weight": 0.5,
             "colbert_weight": 2.9,
             "num_heads": 8,
@@ -67,9 +65,8 @@ V3_ENGINE_PRESETS = {
         name="快速模式",
         description="高BM25权重，快速检索，适合大量文档",
         config={
-            "encoder_backend": "bge",
-            "bge_model_path": "",
-            "hf_model_name": "",
+            "encoder_backend": "hf",
+            "hf_model_name": "BAAI/bge-small-zh-v1.5",
             "bm25_weight": 2.0,
             "colbert_weight": 0.5,
             "num_heads": 4,
@@ -92,9 +89,8 @@ V3_ENGINE_PRESETS = {
         name="对话模式",
         description="高上下文影响，适合多轮对话",
         config={
-            "encoder_backend": "bge",
-            "bge_model_path": "",
-            "hf_model_name": "",
+            "encoder_backend": "hf",
+            "hf_model_name": "BAAI/bge-small-zh-v1.5",
             "bm25_weight": 1.0,
             "colbert_weight": 1.5,
             "num_heads": 8,
@@ -115,20 +111,24 @@ V3_ENGINE_PRESETS = {
     
     "hf_optimized": V3EnginePreset(
         name="HF优化模式",
-        description="使用HuggingFace模型，适合需要自定义模型的场景",
+        description="专为HuggingFace模型优化的配置",
         config={
             "encoder_backend": "hf",
-            "bge_model_path": "",
-            "hf_model_name": "",
-            "bm25_weight": 1.0,
-            "colbert_weight": 1.5,
-            "num_heads": 8,
-            "context_influence": 0.3,
+            "hf_model_name": "BAAI/bge-small-zh-v1.5",
+            "bm25_weight": 0.8,
+            "colbert_weight": 1.8,
+            "num_heads": 6,
+            "context_influence": 0.35,
             "final_top_k": 10,
             "use_hybrid_search": True,
             "use_multi_head": True,
             "use_length_penalty": True,
             "use_stateful_reranking": True,
+            # 新增重排序配置
+            "use_reranker": True,
+            "reranker_model_name": "BAAI/bge-reranker-large",
+            "reranker_top_n": 60,
+            "reranker_weight": 1.6,
             "reranker_backend": "auto"  # 新增：重排序后端选择
         }
     )
@@ -136,9 +136,8 @@ V3_ENGINE_PRESETS = {
 
 # 默认配置
 DEFAULT_V3_CONFIG = {
-    "encoder_backend": "bge",
-    "bge_model_path": "",
-    "hf_model_name": "",
+    "encoder_backend": "hf",
+    "hf_model_name": "BAAI/bge-small-zh-v1.5",
     "bm25_weight": 1.0,
     "colbert_weight": 1.5,
     "num_heads": 8,
@@ -162,13 +161,8 @@ DEFAULT_V3_CONFIG = {
 CONFIG_VALIDATION_RULES = {
     "encoder_backend": {
         "type": str,
-        "allowed_values": ["bge", "hf"],
-        "description": "编码后端，支持BGE和HuggingFace"
-    },
-    "bge_model_path": {
-        "type": str,
-        "required_if": {"encoder_backend": "bge"},
-        "description": "BGE模型路径，当使用BGE后端时必需"
+        "allowed_values": ["hf"],
+        "description": "编码后端，支持HF"
     },
     "hf_model_name": {
         "type": str,

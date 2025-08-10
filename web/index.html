@@ -54,6 +54,15 @@
           <div class="config-card">
             <h3>🚀 V3引擎配置</h3>
             
+            <!-- 模型状态指示器 -->
+            <div class="model-status">
+              <div class="status-indicator">
+                <span class="status-dot online"></span>
+                <span class="status-text">在线模型模式</span>
+              </div>
+              <small class="form-hint">系统已优化为使用HuggingFace在线模型，自动下载和缓存</small>
+            </div>
+            
             <!-- 预设配置选择器 -->
             <div class="form-group">
               <label>预设配置：</label>
@@ -69,24 +78,20 @@
             
             <div class="form-group">
               <label>编码后端：</label>
-              <select id="encoder_backend" onchange="toggleModelInputs()">
-                <option value="bge">BGE (本地模型)</option>
-                <option value="hf">HuggingFace (在线模型)</option>
+              <select id="encoder_backend" disabled>
+                <option value="hf" selected>HuggingFace (在线模型)</option>
               </select>
+              <small class="form-hint">系统已固定使用HF模型，确保最佳性能和兼容性</small>
             </div>
-            <div class="form-group" id="bge_model_group">
-              <label>BGE模型路径：</label>
-              <input type="text" id="bge_model_path" placeholder="请输入模型标识符，例如：BAAI/bge-small-zh-v1.5" />
-              <small class="form-hint">本地模型路径，需要先下载到本地</small>
-            </div>
-            <div class="form-group" id="hf_model_group" style="display: none;">
+            <div class="form-group" id="hf_model_group">
               <label>HF模型名：</label>
-              <input type="text" id="hf_model_name" placeholder="例如：BAAI/bge-small-zh-v1.5" />
-              <small class="form-hint">HuggingFace模型名称，将自动下载</small>
+              <input type="text" id="hf_model_name" placeholder="例如：BAAI/bge-small-zh-v1.5" value="BAAI/bge-small-zh-v1.5" />
+              <small class="form-hint">HuggingFace模型名称，将自动下载并缓存到本地</small>
             </div>
             <div class="form-group">
               <label>嵌入维度：</label>
               <input type="number" id="embedding_dim" value="512" min="128" max="1024" step="128" />
+              <small class="form-hint">根据选择的模型自动调整</small>
             </div>
             
             <!-- 混合搜索配置 -->

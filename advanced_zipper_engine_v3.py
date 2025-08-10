@@ -11,9 +11,9 @@ from contextlib import nullcontext
 
 # 依赖项检查
 try:
-    from FlagEmbedding import FlagModel
+    from transformers import AutoTokenizer, AutoModel
 except ImportError:
-    raise ImportError("FlagEmbedding未安装。请运行: pip install FlagEmbedding")
+    raise ImportError("transformers未安装。请运行: pip install transformers")
 
 # --- 新增: 引入HF模型 ---
 try:
@@ -37,13 +37,10 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 @dataclass
 class ZipperV3Config:
-    # 修改这一行 - 从错误的本地缓存路径改为正确的模型标识符
-    bge_model_path: str = "BAAI/bge-small-zh-v1.5"  # 修复：使用正确的模型标识符
+    # 强制使用HF模型，移除本地模型选择
+    encoder_backend: str = "hf"  # 固定为HF
+    hf_model_name: str = "BAAI/bge-small-zh-v1.5"  # 默认HF模型
     embedding_dim: int = 512
-    
-    # --- 新增: 编码后端选择 ('bge' 或 'hf') 与 HF 模型名 ---
-    encoder_backend: str = "bge"
-    hf_model_name: Optional[str] = None
     
     bm25_top_n: int = 100
     final_top_k: int = 10
@@ -83,40 +80,41 @@ class ZipperV3State:
     context_vector: torch.Tensor
     
 class TokenLevelEncoder:
-    def __init__(self, model_path: str, use_fp16: bool = True, enable_amp_if_beneficial: bool = True, backend: str = "bge", hf_model_name: Optional[str] = None):
-        self.backend = backend.lower()
+    def __init__(self, model_name: str, use_fp16: bool = True, enable_amp_if_beneficial: bool = True, backend: str = "hf", hf_model_name: Optional[str] = None):
+        # 强制使用HF后端
+        self.backend = "hf"
         self.enable_amp_if_beneficial = enable_amp_if_beneficial
         self.gpu_name = (torch.cuda.get_device_name(0).upper() if torch.cuda.is_available() else "CPU")
         self.use_amp = (torch.cuda.is_available() and "GTX" not in self.gpu_name and self.enable_amp_if_beneficial)
         self.autocast_dtype = (torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16)
 
-        if self.backend == "bge":
-            logger.info(f"正在加载BGE模型用于Token级编码: {model_path}")
-            self.model = FlagModel(
-                model_path,
-                query_instruction_for_retrieval="为这个句子生成表示以用于检索相关文章：",
-                use_fp16=use_fp16 if device.type == 'cuda' else False
-            )
-            self.model.model.to(device).eval()
-            self.tokenizer = self.model.tokenizer
-            logger.info("Token级编码器(BGE)加载成功。")
-        elif self.backend == "hf":
-            if AutoTokenizer is None or AutoModel is None:
-                raise ImportError("未安装 transformers。请运行: pip install transformers")
-            model_id = hf_model_name or model_path
-            logger.info(f"正在加载HF模型用于Token级编码: {model_id}")
-            self.tokenizer = AutoTokenizer.from_pretrained(model_id)
-            self.model = AutoModel.from_pretrained(model_id).to(device).eval()
-            # 自动前缀：对E5家族自动加 query:/passage:
-            self.query_prefix = ""
-            self.doc_prefix = ""
-            _name = model_id.lower()
-            if "e5" in _name:
-                self.query_prefix = "query: "
-                self.doc_prefix = "passage: "
-            logger.info("Token级编码器(HF)加载成功。")
-        else:
-            raise ValueError(f"不支持的编码后端: {self.backend}")
+        # 强制使用HF模型
+        if AutoTokenizer is None or AutoModel is None:
+            raise ImportError("未安装 transformers。请运行: pip install transformers")
+        
+        # 使用传入的模型名称或默认名称
+        model_id = hf_model_name or model_name
+        if not model_id or model_id.strip() == "":
+            # 如果都没有提供，使用默认的BGE模型
+            model_id = "BAAI/bge-small-zh-v1.5"
+            logger.warning(f"未提供有效的HF模型名称，使用默认模型: {model_id}")
+        
+        # 确保模型名称有效
+        if not model_id or model_id.strip() == "":
+            raise ValueError("必须提供有效的HF模型名称")
+        
+        logger.info(f"正在加载HF模型用于Token级编码: {model_id}")
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id)
+        self.model = AutoModel.from_pretrained(model_id).to(device).eval()
+        
+        # 自动前缀：对E5家族自动加 query:/passage:
+        self.query_prefix = ""
+        self.doc_prefix = ""
+        _name = model_id.lower()
+        if "e5" in _name:
+            self.query_prefix = "query: "
+            self.doc_prefix = "passage: "
+        logger.info("Token级编码器(HF)加载成功。")
 
         # --- 新增：显卡/AMP 自适应信息日志 ---
         try:
@@ -138,10 +136,7 @@ class TokenLevelEncoder:
         return summed / counts
 
     def encode_query(self, query: str) -> torch.Tensor:
-        if self.backend == "bge":
-            query_embeddings = self.model.encode_queries([query])
-            return torch.tensor(query_embeddings, device=device)
-        # HF: 使用平均池化并L2归一化
+        # 只使用HF模型：使用平均池化并L2归一化
         text_for_encode = (getattr(self, 'query_prefix', '') + query) if getattr(self, 'query_prefix', '') else query
         inputs = self.tokenizer([text_for_encode], return_tensors='pt', truncation=True, max_length=512, padding=True).to(device)
         with torch.no_grad():
@@ -154,9 +149,7 @@ class TokenLevelEncoder:
         return sent
 
     def encode_documents(self, documents: List[str]) -> torch.Tensor:
-        if self.backend == "bge":
-            doc_embeddings = self.model.encode(documents, batch_size=64)
-            return torch.tensor(doc_embeddings, device=device)
+        # 只使用HF模型
         all_vecs = []
         bs = 64
         for i in range(0, len(documents), bs):
@@ -172,7 +165,7 @@ class TokenLevelEncoder:
                     sent = self._mean_pool(outputs.last_hidden_state, inputs['attention_mask'])
                     sent = torch.nn.functional.normalize(sent, p=2, dim=1)
             all_vecs.append(sent)
-        return torch.cat(all_vecs, dim=0) if all_vecs else torch.empty(0, 0, device=device)
+        return torch.cat(all_vecs, dim=0)
 
     def encode_tokens(self, text: str, max_length: int = 512) -> torch.Tensor:
         if self.backend == "bge":
@@ -448,7 +441,7 @@ class AdvancedZipperQueryEngineV3:
     def __init__(self, config: ZipperV3Config):
         self.config = config
         self.encoder = TokenLevelEncoder(
-            config.bge_model_path,
+            config.hf_model_name, # 强制使用HF模型
             enable_amp_if_beneficial=config.enable_amp_if_beneficial,
             backend=config.encoder_backend,
             hf_model_name=config.hf_model_name
