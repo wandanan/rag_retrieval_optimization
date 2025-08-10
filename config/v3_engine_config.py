@@ -18,8 +18,8 @@ V3_ENGINE_PRESETS = {
         description="BM25和ColBERT权重平衡，适合一般用途",
         config={
             "encoder_backend": "bge",
-            "bge_model_path": "models--BAAI--bge-small-zh-v1.5/snapshots/7999e1d3359715c523056ef9478215996d62a620",
-            "hf_model_name": None,
+            "bge_model_path": "",
+            "hf_model_name": "",
             "bm25_weight": 1.0,
             "colbert_weight": 1.0,
             "num_heads": 8,
@@ -43,8 +43,8 @@ V3_ENGINE_PRESETS = {
         description="高ColBERT权重，适合需要高精度的场景",
         config={
             "encoder_backend": "bge",
-            "bge_model_path": "models--BAAI--bge-small-zh-v1.5/snapshots/7999e1d3359715c523056ef9478215996d62a620",
-            "hf_model_name": None,
+            "bge_model_path": "",
+            "hf_model_name": "",
             "bm25_weight": 0.5,
             "colbert_weight": 2.9,
             "num_heads": 8,
@@ -68,8 +68,8 @@ V3_ENGINE_PRESETS = {
         description="高BM25权重，快速检索，适合大量文档",
         config={
             "encoder_backend": "bge",
-            "bge_model_path": "models--BAAI--bge-small-zh-v1.5/snapshots/7999e1d3359715c523056ef9478215996d62a620",
-            "hf_model_name": None,
+            "bge_model_path": "",
+            "hf_model_name": "",
             "bm25_weight": 2.0,
             "colbert_weight": 0.5,
             "num_heads": 4,
@@ -81,7 +81,7 @@ V3_ENGINE_PRESETS = {
             "use_stateful_reranking": False,
             # 新增重排序配置
             "use_reranker": False,
-            "reranker_model_name": "BAAI/bge-reranker-large",
+            "reranker_model_name": "",
             "reranker_top_n": 30,
             "reranker_weight": 1.0,
             "reranker_backend": "auto"  # 新增：重排序后端选择
@@ -93,8 +93,8 @@ V3_ENGINE_PRESETS = {
         description="高上下文影响，适合多轮对话",
         config={
             "encoder_backend": "bge",
-            "bge_model_path": "models--BAAI--bge-small-zh-v1.5/snapshots/7999e1d3359715c523056ef9478215996d62a620",
-            "hf_model_name": None,
+            "bge_model_path": "",
+            "hf_model_name": "",
             "bm25_weight": 1.0,
             "colbert_weight": 1.5,
             "num_heads": 8,
@@ -119,7 +119,7 @@ V3_ENGINE_PRESETS = {
         config={
             "encoder_backend": "hf",
             "bge_model_path": "",
-            "hf_model_name": "BAAI/bge-small-zh-v1.5",
+            "hf_model_name": "",
             "bm25_weight": 1.0,
             "colbert_weight": 1.5,
             "num_heads": 8,
@@ -137,8 +137,8 @@ V3_ENGINE_PRESETS = {
 # 默认配置
 DEFAULT_V3_CONFIG = {
     "encoder_backend": "bge",
-    "bge_model_path": "models--BAAI--bge-small-zh-v1.5/snapshots/7999e1d3359715c523056ef9478215996d62a620",
-    "hf_model_name": None,
+    "bge_model_path": "",
+    "hf_model_name": "",
     "bm25_weight": 1.0,
     "colbert_weight": 1.5,
     "num_heads": 8,
@@ -150,6 +150,11 @@ DEFAULT_V3_CONFIG = {
     "use_stateful_reranking": True,
     "precompute_doc_tokens": False,
     "enable_amp_if_beneficial": True,
+    # 重排序默认配置
+    "use_reranker": True,
+    "reranker_model_name": "BAAI/bge-reranker-large",
+    "reranker_top_n": 50,
+    "reranker_weight": 1.5,
     "reranker_backend": "auto"  # 新增：重排序后端选择
 }
 
@@ -170,6 +175,11 @@ CONFIG_VALIDATION_RULES = {
         "required_if": {"encoder_backend": "hf"},
         "description": "HuggingFace模型名称，当使用HF后端时必需"
     },
+    "reranker_model_name": {
+        "type": str,
+        "required_if": {"use_reranker": True},
+        "description": "重排序模型名称，当启用重排序时必需"
+    },
     "bm25_weight": {
         "type": float,
         "min": 0.0,
@@ -185,7 +195,7 @@ CONFIG_VALIDATION_RULES = {
     "num_heads": {
         "type": int,
         "min": 1,
-        "max": 8,
+        "max": 16,
         "description": "多头数量，范围1-16"
     },
     "context_influence": {
@@ -221,6 +231,13 @@ def validate_v3_config(config: Dict[str, Any]) -> tuple[bool, list[str]]:
         if "type" in rule and not isinstance(value, rule["type"]):
             errors.append(f"{key} 类型错误，期望 {rule['type'].__name__}，实际 {type(value).__name__}")
             continue
+        
+        # 字符串类型特殊处理
+        if isinstance(value, str) and "type" in rule and rule["type"] == str:
+            # 检查字符串是否为空（对于必需字段）
+            if "required_if" in rule and not value.strip():
+                errors.append(f"{key} 不能为空")
+                continue
         
         # 值范围检查
         if "min" in rule and value < rule["min"]:

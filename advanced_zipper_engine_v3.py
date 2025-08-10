@@ -399,7 +399,7 @@ class CrossEncoderReranker:
     def _rerank_transformers(self, query: str, documents: List[str], top_n: int = None) -> List[Tuple[int, float]]:
         """使用Transformers/ONNX进行重排序"""
         # 准备查询-文档对
-        pairs = [['query', query], ['passage', doc] for doc in documents]
+        pairs = [['query', query]] + [['passage', doc] for doc in documents]
         
         # 使用tokenizer处理输入
         with torch.no_grad():

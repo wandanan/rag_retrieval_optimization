@@ -33,6 +33,37 @@ const DEFAULT_CONFIG = {
   [CONFIG_KEYS.HISTORY]: 'history'
 };
 
+// V3引擎默认配置
+const V3_DEFAULT_CONFIG = {
+  'encoder_backend': 'bge',
+  'bge_model_path': 'models--BAAI--bge-small-zh-v1.5/snapshots/7999e1d3359715c523056ef9478215996d62a620',
+  'hf_model_name': '',
+  'embedding_dim': '512',
+  'bm25_weight': '1.0',
+  'colbert_weight': '1.5',
+  'num_heads': '8',
+  'context_influence': '0.3',
+  'length_penalty_alpha': '0.05',
+  'context_memory_decay': '0.8',
+  'bm25_top_n': '100',
+  'final_top_k': '10',
+  'encode_batch_size': '64',
+  'max_length': '256',
+  'use_hybrid_search': true,
+  'use_multi_head': true,
+  'use_length_penalty': true,
+  'use_stateful_reranking': true,
+  'precompute_doc_tokens': false,
+  'enable_amp_if_beneficial': true,
+  'include_contexts': false,
+  // 重排序默认配置
+  'use_reranker': true,
+  'reranker_model_name': 'BAAI/bge-reranker-large',
+  'reranker_top_n': '50',
+  'reranker_weight': '1.5',
+  'reranker_backend': 'auto'
+};
+
 // DOM 元素
 const elements = {
   uploadForm: document.getElementById('uploadForm'),
@@ -381,6 +412,16 @@ async function askQuestion() {
   elements.v3Ctx.innerHTML = '';
   elements.v3Metrics.innerHTML = '';
 
+  // 根据编码后端选择性地设置模型配置
+  const modelConfig = {};
+  if (encoder_backend === 'bge') {
+    modelConfig.bge_model_path = bge_model_path;
+    modelConfig.hf_model_name = '';
+  } else if (encoder_backend === 'hf') {
+    modelConfig.bge_model_path = '';
+    modelConfig.hf_model_name = hf_model_name;
+  }
+
   const payload = {
     question,
     top_k_parents,
@@ -389,8 +430,7 @@ async function askQuestion() {
     llm: { base_url, model, api_key, temperature: 0.2 },
     v3_config: {
       encoder_backend,
-      bge_model_path,
-      hf_model_name,
+      ...modelConfig,
       embedding_dim,
       bm25_weight,
       colbert_weight,
@@ -539,6 +579,36 @@ function handleConfigChange() {
   saveConfig();
 }
 
+// 模型输入切换函数
+function toggleModelInputs() {
+  const encoderBackend = document.getElementById('encoder_backend').value;
+  const bgeGroup = document.getElementById('bge_model_group');
+  const hfGroup = document.getElementById('hf_model_group');
+  
+  if (encoderBackend === 'bge') {
+    bgeGroup.style.display = 'block';
+    hfGroup.style.display = 'none';
+    // 清空HF模型名
+    document.getElementById('hf_model_name').value = '';
+  } else {
+    bgeGroup.style.display = 'none';
+    hfGroup.style.display = 'block';
+    // 清空BGE模型路径
+    document.getElementById('bge_model_path').value = '';
+  }
+}
+
+// 页面加载时初始化模型输入显示
+document.addEventListener('DOMContentLoaded', function() {
+  toggleModelInputs();
+  
+  // 设置重排序模型的默认值
+  const rerankerModelInput = document.getElementById('reranker_model_name');
+  if (rerankerModelInput && !rerankerModelInput.value.trim()) {
+    rerankerModelInput.value = 'BAAI/bge-reranker-large';
+  }
+});
+
 // 预设配置应用函数
 function applyPreset() {
   const presetSelect = document.getElementById('preset_config');
@@ -548,6 +618,7 @@ function applyPreset() {
   
   const presets = {
     balanced: {
+      encoder_backend: 'bge',
       bm25_weight: 1.0,
       colbert_weight: 1.5,
       num_heads: 8,
@@ -566,6 +637,7 @@ function applyPreset() {
       reranker_backend: "auto"
     },
     precision: {
+      encoder_backend: 'bge',
       bm25_weight: 0.8,
       colbert_weight: 2.0,
       num_heads: 12,
@@ -584,6 +656,7 @@ function applyPreset() {
       reranker_backend: "auto"
     },
     speed: {
+      encoder_backend: 'bge',
       bm25_weight: 1.2,
       colbert_weight: 1.0,
       num_heads: 4,
@@ -596,12 +669,13 @@ function applyPreset() {
       max_length: 192,
       // 新增重排序配置
       use_reranker: false,
-      reranker_model_name: "BAAI/bge-reranker-large",
+      reranker_model_name: "",
       reranker_top_n: 30,
       reranker_weight: 1.0,
       reranker_backend: "auto"
     },
     conversational: {
+      encoder_backend: 'bge',
       bm25_weight: 0.9,
       colbert_weight: 1.8,
       num_heads: 10,
@@ -620,6 +694,7 @@ function applyPreset() {
       reranker_backend: "auto"
     },
     hf_optimized: {
+      encoder_backend: 'hf',
       bm25_weight: 1.1,
       colbert_weight: 1.6,
       num_heads: 6,
@@ -652,6 +727,9 @@ function applyPreset() {
       }
     });
     
+    // 更新UI状态
+    toggleModelInputs();
+    
     // 保存配置
     saveConfig();
     
@@ -671,6 +749,7 @@ function applyPreset() {
 // 验证并显示配置
 function validateAndShowConfig() {
   const config = {};
+  const errors = [];
   
   // 收集所有配置
   const allConfigElements = [
@@ -697,9 +776,29 @@ function validateAndShowConfig() {
     }
   });
   
+  // 验证模型配置
+  const encoderBackend = config.encoder_backend;
+  if (encoderBackend === 'bge' && !config.bge_model_path.trim()) {
+    errors.push('❌ BGE模型路径不能为空');
+  } else if (encoderBackend === 'hf' && !config.hf_model_name.trim()) {
+    errors.push('❌ HF模型名不能为空');
+  }
+  
+  // 验证重排序配置
+  if (config.use_reranker && !config.reranker_model_name.trim()) {
+    errors.push('❌ 重排序模型名不能为空');
+  }
+  
   // 显示配置对话框
   const dialog = document.createElement('div');
   dialog.className = 'config-dialog';
+  
+  const errorHtml = errors.length > 0 ? 
+    `<div class="config-errors" style="color: #ef4444; margin-bottom: 15px; padding: 10px; background: #fef2f2; border-radius: 5px;">
+      <strong>配置验证错误：</strong><br>
+      ${errors.join('<br>')}
+    </div>` : '';
+  
   dialog.innerHTML = `
     <div class="config-dialog-content">
       <div class="config-dialog-header">
@@ -707,6 +806,7 @@ function validateAndShowConfig() {
         <button class="close-btn" onclick="this.parentElement.parentElement.parentElement.remove()">&times;</button>
       </div>
       <div class="config-dialog-body">
+        ${errorHtml}
         <pre>${JSON.stringify(config, null, 2)}</pre>
       </div>
       <div class="config-dialog-footer">

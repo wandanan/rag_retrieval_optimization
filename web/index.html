@@ -69,18 +69,20 @@
             
             <div class="form-group">
               <label>编码后端：</label>
-              <select id="encoder_backend">
-                <option value="bge">BGE (推荐)</option>
-                <option value="hf">HuggingFace</option>
+              <select id="encoder_backend" onchange="toggleModelInputs()">
+                <option value="bge">BGE (本地模型)</option>
+                <option value="hf">HuggingFace (在线模型)</option>
               </select>
             </div>
-            <div class="form-group">
+            <div class="form-group" id="bge_model_group">
               <label>BGE模型路径：</label>
-              <input type="text" id="bge_model_path" value="models--BAAI--bge-small-zh-v1.5/snapshots/7999e1d3359715c523056ef9478215996d62a620" />
+              <input type="text" id="bge_model_path" placeholder="请输入本地模型路径，例如：models--BAAI--bge-small-zh-v1.5/snapshots/xxx" />
+              <small class="form-hint">本地模型路径，需要先下载到本地</small>
             </div>
-            <div class="form-group">
+            <div class="form-group" id="hf_model_group" style="display: none;">
               <label>HF模型名：</label>
               <input type="text" id="hf_model_name" placeholder="例如：BAAI/bge-small-zh-v1.5" />
+              <small class="form-hint">HuggingFace模型名称，将自动下载</small>
             </div>
             <div class="form-group">
               <label>嵌入维度：</label>
@@ -198,7 +200,8 @@
               <div class="form-row">
                 <div class="form-group">
                   <label>重排序模型：</label>
-                  <input type="text" id="reranker_model_name" value="BAAI/bge-reranker-large" placeholder="重排序模型名称" />
+                  <input type="text" id="reranker_model_name" value="BAAI/bge-reranker-large" placeholder="重排序模型名称，例如：BAAI/bge-reranker-large" />
+                  <small class="form-hint">默认使用在线模型 BAAI/bge-reranker-large</small>
                 </div>
                 <div class="form-group">
                   <label>重排序候选数量：</label>

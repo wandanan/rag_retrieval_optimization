@@ -457,6 +457,14 @@ textarea {
   user-select: none;
 }
 
+.form-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
 /* 高级配置分组样式 */
 .config-card h4 {
   color: #667eea;
