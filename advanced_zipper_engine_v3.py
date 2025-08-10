@@ -8,6 +8,9 @@ import time
 import logging
 from dataclasses import dataclass
 from contextlib import nullcontext
+import hashlib
+import pickle
+import os
 
 # 依赖项检查
 try:
@@ -63,7 +66,7 @@ class ZipperV3Config:
     # 编码性能与兼容性
     encode_batch_size: int = 64
     max_length: int = 256
-    precompute_doc_tokens: bool = False
+    precompute_doc_tokens: bool = True  # 默认改为True，避免每次查询都编码
     enable_amp_if_beneficial: bool = True
     
     # --- 新增: 重排序配置 ---
@@ -72,13 +75,82 @@ class ZipperV3Config:
     reranker_top_n: int = 50
     reranker_weight: float = 1.5
     reranker_backend: str = "auto"  # 新增：重排序后端选择
+    
+    # --- 新增: 索引缓存配置 ---
+    enable_index_cache: bool = True
+    cache_dir: str = "index_cache"
+    cache_version: str = "v3.0"
+    
+    # --- 新增: 索引构建策略配置 ---
+    auto_build_index: bool = True  # 自动构建索引
+    incremental_update: bool = True  # 启用增量更新
+    warmup_on_first_query: bool = True  # 首次查询时预热
+    index_rebuild_threshold: float = 0.3  # 文档变化超过30%时重建索引
 
 
 @dataclass
 class ZipperV3State:
     original_query: str
     context_vector: torch.Tensor
+
+
+# --- 新增: 索引缓存管理器 ---
+class IndexCacheManager:
+    """索引缓存管理器，避免重复构建索引"""
     
+    def __init__(self, cache_dir: str = "index_cache", cache_version: str = "v3.0"):
+        self.cache_dir = cache_dir
+        self.cache_version = cache_version
+        os.makedirs(cache_dir, exist_ok=True)
+    
+    def _get_cache_key(self, documents: Dict[int, str], config_hash: str) -> str:
+        """生成缓存键"""
+        # 基于文档内容和配置生成唯一标识
+        doc_content = "".join([f"{k}:{v[:100]}" for k, v in sorted(documents.items())])
+        content_hash = hashlib.md5(doc_content.encode()).hexdigest()
+        return f"{self.cache_version}_{config_hash}_{content_hash}"
+    
+    def _get_config_hash(self, config: ZipperV3Config) -> str:
+        """生成配置哈希"""
+        config_str = f"{config.hf_model_name}_{config.embedding_dim}_{config.max_length}_{config.precompute_doc_tokens}"
+        return hashlib.md5(config_str.encode()).hexdigest()
+    
+    def save_index(self, cache_key: str, index_data: dict) -> bool:
+        """保存索引到缓存"""
+        try:
+            cache_file = os.path.join(self.cache_dir, f"{cache_key}.pkl")
+            with open(cache_file, 'wb') as f:
+                pickle.dump(index_data, f)
+            logger.info(f"索引缓存保存成功: {cache_file}")
+            return True
+        except Exception as e:
+            logger.warning(f"索引缓存保存失败: {e}")
+            return False
+    
+    def load_index(self, cache_key: str) -> Optional[dict]:
+        """从缓存加载索引"""
+        try:
+            cache_file = os.path.join(self.cache_dir, f"{cache_key}.pkl")
+            if os.path.exists(cache_file):
+                with open(cache_file, 'rb') as f:
+                    index_data = pickle.load(f)
+                logger.info(f"索引缓存加载成功: {cache_file}")
+                return index_data
+        except Exception as e:
+            logger.warning(f"索引缓存加载失败: {e}")
+        return None
+    
+    def clear_cache(self):
+        """清理所有缓存"""
+        try:
+            for file in os.listdir(self.cache_dir):
+                if file.endswith('.pkl'):
+                    os.remove(os.path.join(self.cache_dir, file))
+            logger.info("索引缓存清理完成")
+        except Exception as e:
+            logger.warning(f"索引缓存清理失败: {e}")
+
+
 class TokenLevelEncoder:
     def __init__(self, model_name: str, use_fp16: bool = True, enable_amp_if_beneficial: bool = True, backend: str = "hf", hf_model_name: Optional[str] = None):
         # 强制使用HF后端
@@ -466,16 +538,142 @@ class AdvancedZipperQueryEngineV3:
             print(config.embedding_dim, config.num_heads)
             raise ValueError("embedding_dim 必须能被 num_heads 整除")
         
+        # --- 新增: 索引状态管理 ---
         self.documents: Dict[int, str] = {}
         self.doc_token_embeddings: Dict[int, torch.Tensor] = {}
         self.bm25_index: Optional[BM25Okapi] = None
         self.bm25_idx_to_pid: Dict[int, int] = {}
+        self.index_built: bool = False  # 新增：索引构建状态标志
         
-        logger.info("AdvancedZipperQueryEngine V3 初始化完成 (多策略优化版 + 重排序)")
+        # --- 新增: 索引缓存管理器 ---
+        if config.enable_index_cache:
+            self.cache_manager = IndexCacheManager(
+                cache_dir=config.cache_dir,
+                cache_version=config.cache_version
+            )
+        else:
+            self.cache_manager = None
+        
+        # --- 新增: 索引状态跟踪 ---
+        self.documents_hash: str = ""  # 文档内容哈希
+        self.last_query_time: float = 0  # 上次查询时间
+        self.query_count: int = 0  # 查询次数统计
+        
+        logger.info("AdvancedZipperQueryEngine V3 初始化完成 (多策略优化版 + 重排序 + 索引缓存 + 智能索引管理)")
 
-    def build_document_index(self, documents: Dict[int, str]):
+    def build_document_index(self, documents: Dict[int, str], force_rebuild: bool = False):
+        """
+        智能构建文档索引，支持缓存、增量更新和智能重建
+        
+        Args:
+            documents: 文档字典 {doc_id: content}
+            force_rebuild: 是否强制重新构建索引
+        """
+        # 计算文档内容哈希
+        current_hash = self._calculate_documents_hash(documents)
+        
+        # 检查是否已经构建过索引且内容未变化
+        if self.index_built and not force_rebuild and current_hash == self.documents_hash:
+            logger.info("索引已存在且文档未变化，跳过重复构建")
+            return
+        
+        # 检查是否需要增量更新
+        if (self.index_built and self.config.incremental_update and 
+            not force_rebuild and current_hash != self.documents_hash):
+            logger.info("检测到文档变化，执行增量更新...")
+            self._incremental_update_index(documents, current_hash)
+            return
+        
+        # 检查是否需要重建索引
+        if self.index_built and not force_rebuild:
+            change_ratio = self._calculate_change_ratio(documents)
+            if change_ratio > self.config.index_rebuild_threshold:
+                logger.info(f"文档变化率({change_ratio:.1%})超过阈值，重建索引...")
+                force_rebuild = True
+        
         logger.info(f"开始构建V3索引，共 {len(documents)} 个文档...")
         start_time = time.time()
+        
+        # 尝试从缓存加载索引
+        if self.cache_manager and not force_rebuild:
+            config_hash = self.cache_manager._get_config_hash(self.config)
+            cache_key = self.cache_manager._get_cache_key(documents, config_hash)
+            cached_index = self.cache_manager.load_index(cache_key)
+            
+            if cached_index:
+                # 从缓存恢复索引
+                self._restore_index_from_cache(cached_index)
+                self.documents_hash = current_hash
+                logger.info(f"索引从缓存加载成功，总耗时: {time.time() - start_time:.3f}秒")
+                return
+        
+        # 构建新索引
+        self._build_full_index(documents, start_time)
+        self.documents_hash = current_hash
+        
+        # 保存索引到缓存
+        if self.cache_manager:
+            self._save_index_to_cache()
+        
+        logger.info(f"V3索引构建完成，总耗时: {time.time() - start_time:.3f}秒")
+    
+    def _calculate_documents_hash(self, documents: Dict[int, str]) -> str:
+        """计算文档内容的哈希值"""
+        content = "".join([f"{k}:{v}" for k, v in sorted(documents.items())])
+        return hashlib.md5(content.encode()).hexdigest()
+    
+    def _calculate_change_ratio(self, new_documents: Dict[int, str]) -> float:
+        """计算文档变化率"""
+        if not self.documents:
+            return 1.0
+        
+        total_docs = len(set(self.documents.keys()) | set(new_documents.keys()))
+        changed_docs = 0
+        
+        for doc_id in set(self.documents.keys()) | set(new_documents.keys()):
+            old_content = self.documents.get(doc_id, "")
+            new_content = new_documents.get(doc_id, "")
+            if old_content != new_content:
+                changed_docs += 1
+        
+        return changed_docs / total_docs if total_docs > 0 else 0.0
+    
+    def _incremental_update_index(self, new_documents: Dict[int, str], new_hash: str):
+        """增量更新索引"""
+        start_time = time.time()
+        
+        # 找出新增、删除和修改的文档
+        added_pids = set(new_documents.keys()) - set(self.documents.keys())
+        removed_pids = set(self.documents.keys()) - set(new_documents.keys())
+        modified_pids = {pid for pid in set(self.documents.keys()) & set(new_documents.keys()) 
+                        if self.documents[pid] != new_documents[pid]}
+        
+        logger.info(f"增量更新: 新增{len(added_pids)}个, 删除{len(removed_pids)}个, 修改{len(modified_pids)}个文档")
+        
+        # 更新文档字典
+        self.documents = new_documents.copy()
+        
+        # 删除已移除文档的索引
+        for pid in removed_pids:
+            self.doc_token_embeddings.pop(pid, None)
+        
+        # 重新构建BM25索引（因为文档变化会影响整个索引）
+        doc_ids_sorted = sorted(self.documents.keys())
+        corpus_list = [self.documents[pid] for pid in doc_ids_sorted]
+        tokenized_corpus = [self.encoder.tokenize(doc) for doc in corpus_list]
+        self.bm25_index = BM25Okapi(tokenized_corpus)
+        self.bm25_idx_to_pid = {i: pid for i, pid in enumerate(doc_ids_sorted)}
+        
+        # 更新token embeddings（仅处理新增和修改的文档）
+        pids_to_update = added_pids | modified_pids
+        if pids_to_update and self.config.precompute_doc_tokens:
+            self._update_token_embeddings(pids_to_update)
+        
+        self.documents_hash = new_hash
+        logger.info(f"增量更新完成，耗时: {time.time() - start_time:.3f}秒")
+    
+    def _build_full_index(self, documents: Dict[int, str], start_time: float):
+        """构建完整索引"""
         self.documents = documents
         
         doc_ids_sorted = sorted(self.documents.keys())
@@ -489,20 +687,50 @@ class AdvancedZipperQueryEngineV3:
         logger.info("构建Token级稠密索引...")
         self.doc_token_embeddings = {}
         if self.config.precompute_doc_tokens:
-            bs = self.config.encode_batch_size
-            max_len = self.config.max_length
-            for i in range(0, len(corpus_list), bs):
-                batch_texts = corpus_list[i:i+bs]
-                batch_pids = doc_ids_sorted[i:i+bs]
-                batch_vecs = self.encoder.encode_tokens_batch(batch_texts, max_length=max_len)
-                for pid, vecs in zip(batch_pids, batch_vecs):
-                    self.doc_token_embeddings[pid] = vecs
-                if (i + bs) % 100 == 0 or i + bs >= len(corpus_list):
-                    logger.info(f"  已处理 {min(i+bs, len(corpus_list))}/{len(corpus_list)} 个文档的Token向量化")
+            self._update_token_embeddings(doc_ids_sorted)
         else:
             logger.info("跳过全量token向量化，将在检索时按需编码候选文档。")
-
-        logger.info(f"V3索引构建完成，总耗时: {time.time() - start_time:.3f}秒")
+        
+        self.index_built = True
+    
+    def _update_token_embeddings(self, pids: List[int]):
+        """更新指定文档的token embeddings"""
+        bs = self.config.encode_batch_size
+        max_len = self.config.max_length
+        
+        for i in range(0, len(pids), bs):
+            batch_pids = pids[i:i+bs]
+            batch_texts = [self.documents[pid] for pid in batch_pids]
+            batch_vecs = self.encoder.encode_tokens_batch(batch_texts, max_length=max_len)
+            
+            for pid, vecs in zip(batch_pids, batch_vecs):
+                self.doc_token_embeddings[pid] = vecs
+            
+            if (i + bs) % 100 == 0 or i + bs >= len(pids):
+                logger.info(f"  已处理 {min(i+bs, len(pids))}/{len(pids)} 个文档的Token向量化")
+    
+    def _restore_index_from_cache(self, cached_index: dict):
+        """从缓存恢复索引"""
+        self.documents = cached_index['documents']
+        self.doc_token_embeddings = cached_index['doc_token_embeddings']
+        self.bm25_index = cached_index['bm25_index']
+        self.bm25_idx_to_pid = cached_index['bm25_idx_to_pid']
+        self.index_built = True
+    
+    def _save_index_to_cache(self):
+        """保存索引到缓存"""
+        try:
+            config_hash = self.cache_manager._get_config_hash(self.config)
+            cache_key = self.cache_manager._get_cache_key(self.documents, config_hash)
+            index_data = {
+                'documents': self.documents,
+                'doc_token_embeddings': self.doc_token_embeddings,
+                'bm25_index': self.bm25_index,
+                'bm25_idx_to_pid': self.bm25_idx_to_pid
+            }
+            self.cache_manager.save_index(cache_key, index_data)
+        except Exception as e:
+            logger.warning(f"索引缓存保存失败: {e}")
 
     def _calculate_colbert_score(self, query_emb: torch.Tensor, doc_emb: torch.Tensor) -> float:
         if query_emb.nelement() == 0 or doc_emb.nelement() == 0: return 0.0
@@ -550,6 +778,13 @@ class AdvancedZipperQueryEngineV3:
         return score
 
     def retrieve(self, query: str, state: Optional[ZipperV3State] = None) -> List[Tuple[int, float, str]]:
+        # 智能索引检查和预热
+        self._ensure_index_ready()
+        
+        # 更新查询统计
+        self.query_count += 1
+        self.last_query_time = time.time()
+        
         if self.bm25_index is None: return []
 
         logger.info(f"V3 开始检索，查询: '{query[:50]}...'")
@@ -561,18 +796,19 @@ class AdvancedZipperQueryEngineV3:
         candidate_pids = [self.bm25_idx_to_pid[idx] for idx in bm25_candidate_indices]
         bm25_scores_map = {pid: bm25_raw_scores[idx] for idx, pid in zip(bm25_candidate_indices, candidate_pids)}
 
-        # 1.5 按需补齐候选文档的 Token 向量
-        missing_pids = [pid for pid in candidate_pids if pid not in self.doc_token_embeddings]
-        if missing_pids:
-            texts = [self.documents[pid] for pid in missing_pids]
-            bs = self.config.encode_batch_size
-            max_len = self.config.max_length
-            for i in range(0, len(texts), bs):
-                batch_texts = texts[i:i+bs]
-                batch_pids = missing_pids[i:i+bs]
-                batch_vecs = self.encoder.encode_tokens_batch(batch_texts, max_length=max_len)
-                for pid, vecs in zip(batch_pids, batch_vecs):
-                    self.doc_token_embeddings[pid] = vecs
+        # 1.5 按需补齐候选文档的 Token 向量（仅当precompute_doc_tokens=False时）
+        if not self.config.precompute_doc_tokens:
+            missing_pids = [pid for pid in candidate_pids if pid not in self.doc_token_embeddings]
+            if missing_pids:
+                texts = [self.documents[pid] for pid in missing_pids]
+                bs = self.config.encode_batch_size
+                max_len = self.config.max_length
+                for i in range(0, len(texts), bs):
+                    batch_texts = texts[i:i+bs]
+                    batch_pids = missing_pids[i:i+bs]
+                    batch_vecs = self.encoder.encode_tokens_batch(batch_texts, max_length=max_len)
+                    for pid, vecs in zip(batch_pids, batch_vecs):
+                        self.doc_token_embeddings[pid] = vecs
 
         # 2. 准备查询向量 (可能被状态化调整)
         query_tokens_emb = self.encoder.encode_tokens(query, max_length=self.config.max_length)
@@ -593,7 +829,7 @@ class AdvancedZipperQueryEngineV3:
         colbert_min, colbert_max = (colbert_vals.min(), colbert_vals.max()) if colbert_vals.size > 1 else (0, 1)
         
         for pid in candidate_pids:
-            norm_bm25 = (bm25_scores_map.get(pid, 0) - bm25_min) / (bm25_max - bm25_min + 1e-9)
+            norm_bm25 = (bm25_raw_scores[self.bm25_idx_to_pid.index(pid)] - bm25_min) / (bm25_max - bm25_min + 1e-9)
             norm_colbert = (colbert_scores_map.get(pid, 0) - colbert_min) / (colbert_max - colbert_min + 1e-9)
             
             if self.config.use_hybrid_search:
@@ -643,6 +879,38 @@ class AdvancedZipperQueryEngineV3:
         sorted_pids = sorted(candidate_pids, key=lambda pid: fused_scores.get(pid, 0), reverse=True)
         
         return [(pid, fused_scores.get(pid, 0), self.documents[pid]) for pid in sorted_pids[:self.config.final_top_k]]
+    
+    def _ensure_index_ready(self):
+        """确保索引已准备就绪，必要时进行预热"""
+        if not self.index_built:
+            if self.config.auto_build_index and self.documents:
+                logger.info("索引未构建，自动构建索引...")
+                self.build_document_index(self.documents)
+            else:
+                raise RuntimeError("索引尚未构建，请先调用 build_document_index()")
+        
+        # 首次查询预热
+        if (self.config.warmup_on_first_query and self.query_count == 1 and 
+            self.config.precompute_doc_tokens and not self.doc_token_embeddings):
+            logger.info("首次查询，预热token embeddings...")
+            self._warmup_token_embeddings()
+    
+    def _warmup_token_embeddings(self):
+        """预热token embeddings"""
+        if not self.documents:
+            return
+        
+        start_time = time.time()
+        doc_ids = list(self.documents.keys())
+        
+        # 选择前几个文档进行预热
+        warmup_count = min(10, len(doc_ids))
+        warmup_pids = doc_ids[:warmup_count]
+        
+        logger.info(f"预热 {warmup_count} 个文档的token embeddings...")
+        self._update_token_embeddings(warmup_pids)
+        
+        logger.info(f"预热完成，耗时: {time.time() - start_time:.3f}秒")
 
     def update_state(self, state: ZipperV3State, results: List[Tuple[int, float, str]]) -> ZipperV3State:
         if not results or not self.config.use_stateful_reranking: return state
@@ -653,3 +921,113 @@ class AdvancedZipperQueryEngineV3:
             decay = self.config.context_memory_decay
             state.context_vector = decay * state.context_vector + (1-decay) * top_doc_avg_emb
         return state
+    
+    # --- 新增: 索引管理方法 ---
+    def is_index_ready(self) -> bool:
+        """检查索引是否已准备就绪"""
+        return self.index_built and self.bm25_index is not None
+    
+    def clear_index(self):
+        """清理索引"""
+        self.documents.clear()
+        self.doc_token_embeddings.clear()
+        self.bm25_index = None
+        self.bm25_idx_to_pid.clear()
+        self.index_built = False
+        self.documents_hash = ""
+        self.query_count = 0
+        self.last_query_time = 0
+        logger.info("索引已清理")
+    
+    def get_index_stats(self) -> Dict[str, any]:
+        """获取索引统计信息"""
+        return {
+            'index_built': self.index_built,
+            'num_documents': len(self.documents),
+            'num_token_embeddings': len(self.doc_token_embeddings),
+            'bm25_index_exists': self.bm25_index is not None,
+            'cache_enabled': self.cache_manager is not None,
+            'documents_hash': self.documents_hash,
+            'query_count': self.query_count,
+            'last_query_time': self.last_query_time,
+            'precompute_tokens': self.config.precompute_doc_tokens,
+            'incremental_update': self.config.incremental_update
+        }
+    
+    def add_documents(self, new_documents: Dict[int, str]):
+        """添加新文档到索引"""
+        if not self.index_built:
+            logger.warning("索引未构建，请先调用 build_document_index()")
+            return
+        
+        if self.config.incremental_update:
+            # 合并文档并增量更新
+            merged_docs = {**self.documents, **new_documents}
+            self.build_document_index(merged_docs)
+        else:
+            # 强制重建索引
+            merged_docs = {**self.documents, **new_documents}
+            self.build_document_index(merged_docs, force_rebuild=True)
+    
+    def remove_documents(self, doc_ids: List[int]):
+        """从索引中移除文档"""
+        if not self.index_built:
+            logger.warning("索引未构建，请先调用 build_document_index()")
+            return
+        
+        if self.config.incremental_update:
+            # 移除指定文档并增量更新
+            remaining_docs = {k: v for k, v in self.documents.items() if k not in doc_ids}
+            self.build_document_index(remaining_docs)
+        else:
+            # 强制重建索引
+            remaining_docs = {k: v for k, v in self.documents.items() if k not in doc_ids}
+            self.build_document_index(remaining_docs, force_rebuild=True)
+    
+    def force_rebuild_index(self):
+        """强制重建索引"""
+        if self.documents:
+            logger.info("强制重建索引...")
+            self.build_document_index(self.documents, force_rebuild=True)
+        else:
+            logger.warning("没有文档可重建索引")
+
+# --- 使用示例 ---
+if __name__ == "__main__":
+    # 配置V3引擎
+    config = ZipperV3Config(
+        precompute_doc_tokens=True,  # 启用全量token化
+        incremental_update=True,      # 启用增量更新
+        warmup_on_first_query=True,  # 首次查询时预热
+        auto_build_index=True        # 自动构建索引
+    )
+    
+    # 初始化引擎
+    engine = AdvancedZipperQueryEngineV3(config)
+    
+    # 示例文档
+    documents = {
+        1: "人工智能是计算机科学的一个分支",
+        2: "机器学习是人工智能的重要技术",
+        3: "深度学习是机器学习的一个子集"
+    }
+    
+    # 构建索引（只会执行一次）
+    engine.build_document_index(documents)
+    
+    # 多次查询（不会重复构建索引）
+    for i in range(3):
+        results = engine.retrieve("什么是机器学习？")
+        print(f"查询 {i+1}: 找到 {len(results)} 个结果")
+    
+    # 添加新文档（增量更新）
+    new_docs = {4: "自然语言处理是AI的重要应用"}
+    engine.add_documents(new_docs)
+    
+    # 查看索引统计
+    stats = engine.get_index_stats()
+    print(f"索引统计: {stats}")
+    
+    # 再次查询（使用更新后的索引）
+    results = engine.retrieve("自然语言处理")
+    print(f"更新后查询: 找到 {len(results)} 个结果")
