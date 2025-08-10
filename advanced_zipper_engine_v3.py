@@ -37,7 +37,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 @dataclass
 class ZipperV3Config:
-    bge_model_path: str = "models--BAAI--bge-small-zh-v1.5/snapshots/7999e1d3359715c523056ef9478215996d62a620"
+    # 修改这一行 - 从错误的本地缓存路径改为正确的模型标识符
+    bge_model_path: str = "BAAI/bge-small-zh-v1.5"  # 修复：使用正确的模型标识符
     embedding_dim: int = 512
     
     # --- 新增: 编码后端选择 ('bge' 或 'hf') 与 HF 模型名 ---

@@ -36,7 +36,8 @@ const DEFAULT_CONFIG = {
 // V3引擎默认配置
 const V3_DEFAULT_CONFIG = {
   'encoder_backend': 'bge',
-  'bge_model_path': 'models--BAAI--bge-small-zh-v1.5/snapshots/7999e1d3359715c523056ef9478215996d62a620',
+  // 修复：从错误的本地缓存路径改为正确的模型标识符
+  'bge_model_path': 'BAAI/bge-small-zh-v1.5',  // 修复这一行
   'hf_model_name': '',
   'embedding_dim': '512',
   'bm25_weight': '1.0',
@@ -199,7 +200,8 @@ function clearConfig() {
     // 重置V3引擎配置到默认值
     const v3Defaults = {
       'encoder_backend': 'bge',
-      'bge_model_path': 'models--BAAI--bge-small-zh-v1.5/snapshots/7999e1d3359715c523056ef9478215996d62a620',
+      // 修复：从错误的本地缓存路径改为正确的模型标识符
+      'bge_model_path': 'BAAI/bge-small-zh-v1.5',  // 修复这一行
       'hf_model_name': '',
       'embedding_dim': '512',
       'bm25_weight': '1.0',

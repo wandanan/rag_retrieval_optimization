@@ -17,7 +17,7 @@ def demo_reranker():
     # 1. 创建配置
     config = ZipperV3Config(
         # 基础配置
-        bge_model_path="models--BAAI--bge-small-zh-v1.5/snapshots/7999e1d3359715c523056ef9478215996d62a620",
+        bge_model_path="BAAI/bge-small-zh-v1.5",  # 修复：使用正确的模型标识符
         bm25_top_n=100,  # 扩大初步召回
         final_top_k=10,
         

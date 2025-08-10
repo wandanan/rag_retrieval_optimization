@@ -208,7 +208,7 @@ def main():
     # --- 在这里配置你的实验策略 ---
     # 这是一套推荐的、在之前测试中表现出色的“全功能”配置
     config = ZipperV3Config(
-        bge_model_path="models--BAAI--bge-small-zh-v1.5/snapshots/7999e1d3359715c523056ef9478215996d62a620",
+        bge_model_path="BAAI/bge-small-zh-v1.5",  # 修复：使用正确的模型标识符
         embedding_dim=512,
         encoder_backend="bge",
         hf_model_name=None,
