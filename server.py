@@ -760,6 +760,74 @@ async def debug_save():
     
     return {"message": f"V3索引已保存: {index_key}"}
 
+@app.post("/api/v3/update_reranker")
+async def update_v3_reranker(payload: Dict[str, Any]):
+    """动态更新V3引擎的重排序配置"""
+    try:
+        if not v3_state.v3_engine:
+            raise HTTPException(status_code=400, detail="V3引擎未初始化，请先上传文档")
+        
+        # 提取重排序配置参数
+        use_reranker = payload.get("use_reranker")
+        reranker_model_name = payload.get("reranker_model_name")
+        reranker_top_n = payload.get("reranker_top_n")
+        reranker_weight = payload.get("reranker_weight")
+        reranker_backend = payload.get("reranker_backend")
+        
+        # 验证参数
+        if reranker_top_n is not None and (not isinstance(reranker_top_n, int) or reranker_top_n < 1):
+            raise HTTPException(status_code=400, detail="reranker_top_n必须是正整数")
+        
+        if reranker_weight is not None and (not isinstance(reranker_weight, (int, float)) or reranker_weight < 0):
+            raise HTTPException(status_code=400, detail="reranker_weight必须是非负数")
+        
+        # 更新重排序配置
+        success = v3_state.v3_engine.update_reranker_config(
+            use_reranker=use_reranker,
+            reranker_model_name=reranker_model_name,
+            reranker_top_n=reranker_top_n,
+            reranker_weight=reranker_weight,
+            reranker_backend=reranker_backend
+        )
+        
+        if success:
+            # 获取更新后的状态
+            reranker_status = v3_state.v3_engine.get_reranker_status()
+            
+            return {
+                "success": True,
+                "message": "重排序配置更新成功",
+                "reranker_status": reranker_status
+            }
+        else:
+            raise HTTPException(status_code=500, detail="重排序配置更新失败")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"更新重排序配置时发生错误: {e}")
+        raise HTTPException(status_code=500, detail=f"服务器内部错误: {str(e)}")
+
+@app.get("/api/v3/reranker_status")
+async def get_v3_reranker_status():
+    """获取V3引擎的重排序器状态"""
+    try:
+        if not v3_state.v3_engine:
+            raise HTTPException(status_code=400, detail="V3引擎未初始化，请先上传文档")
+        
+        reranker_status = v3_state.v3_engine.get_reranker_status()
+        
+        return {
+            "success": True,
+            "reranker_status": reranker_status
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取重排序器状态时发生错误: {e}")
+        raise HTTPException(status_code=500, detail=f"服务器内部错误: {str(e)}")
+
 # -----------------------------
 # 批量测试接口
 # -----------------------------

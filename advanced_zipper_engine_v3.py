@@ -3,7 +3,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict, Optional, Any
 import time
 import logging
 from dataclasses import dataclass
@@ -332,6 +332,47 @@ class CrossEncoderReranker:
         # 尝试按优先级加载不同的后端
         self._load_model()
     
+    def switch_model(self, new_model_name: str, new_backend: str = "auto") -> bool:
+        """
+        动态切换重排序模型
+        
+        Args:
+            new_model_name: 新的模型名称
+            new_backend: 新的后端类型
+            
+        Returns:
+            bool: 切换是否成功
+        """
+        try:
+            logger.info(f"正在切换重排序模型: {self.model_name} -> {new_model_name}")
+            
+            # 清理当前模型
+            if self.model is not None:
+                del self.model
+                self.model = None
+            
+            if self.tokenizer is not None:
+                del self.tokenizer
+                self.tokenizer = None
+            
+            # 更新配置
+            self.model_name = new_model_name
+            self.backend = new_backend
+            
+            # 重新加载模型
+            self._load_model()
+            
+            if self.model is not None:
+                logger.info(f"重排序模型切换成功: {new_model_name}")
+                return True
+            else:
+                logger.error(f"重排序模型切换失败: {new_model_name}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"重排序模型切换时发生错误: {e}")
+            return False
+    
     def _load_model(self):
         """按优先级加载重排序模型"""
         backends_to_try = []
@@ -498,14 +539,15 @@ class CrossEncoderReranker:
         """检查重排序器是否可用"""
         return self.model is not None
     
-    def get_backend_info(self) -> str:
-        """获取当前使用的后端信息"""
-        if hasattr(self.model, 'compute_score'):
-            return "FlagEmbedding"
-        elif hasattr(self.model, 'forward'):
-            return "Transformers/ONNX"
-        else:
-            return "Unknown"
+    def get_model_info(self) -> Dict[str, str]:
+        """获取当前模型信息"""
+        return {
+            'model_name': self.model_name,
+            'backend': self.backend,
+            'is_available': self.is_available(),
+            'device': str(device),
+            'use_fp16': self.use_fp16
+        }
 
 
 # --- V3 主引擎 ---
@@ -1004,6 +1046,96 @@ class AdvancedZipperQueryEngineV3:
             self.build_document_index(self.documents, force_rebuild=True)
         else:
             logger.warning("没有文档可重建索引")
+
+    def update_reranker_config(self, use_reranker: bool = None, reranker_model_name: str = None, 
+                              reranker_top_n: int = None, reranker_weight: float = None, 
+                              reranker_backend: str = None) -> bool:
+        """
+        动态更新重排序配置
+        
+        Args:
+            use_reranker: 是否启用重排序
+            reranker_model_name: 重排序模型名称
+            reranker_top_n: 重排序候选数量
+            reranker_weight: 重排序权重
+            reranker_backend: 重排序后端
+            
+        Returns:
+            bool: 更新是否成功
+        """
+        try:
+            logger.info("正在更新重排序配置...")
+            
+            # 更新配置
+            if use_reranker is not None:
+                self.config.use_reranker = use_reranker
+                logger.info(f"重排序开关已更新: {use_reranker}")
+            
+            if reranker_top_n is not None:
+                self.config.reranker_top_n = reranker_top_n
+                logger.info(f"重排序候选数量已更新: {reranker_top_n}")
+            
+            if reranker_weight is not None:
+                self.config.reranker_weight = reranker_weight
+                logger.info(f"重排序权重已更新: {reranker_weight}")
+            
+            if reranker_backend is not None:
+                self.config.reranker_backend = reranker_backend
+                logger.info(f"重排序后端已更新: {reranker_backend}")
+            
+            # 如果模型名称发生变化，需要重新加载模型
+            if reranker_model_name is not None and reranker_model_name != self.config.reranker_model_name:
+                self.config.reranker_model_name = reranker_model_name
+                logger.info(f"重排序模型名称已更新: {reranker_model_name}")
+                
+                # 如果重排序器已存在，尝试切换模型
+                if self.reranker and self.config.use_reranker:
+                    success = self.reranker.switch_model(reranker_model_name, self.config.reranker_backend)
+                    if success:
+                        logger.info(f"重排序模型切换成功: {reranker_model_name}")
+                    else:
+                        logger.warning(f"重排序模型切换失败: {reranker_model_name}")
+                        # 如果切换失败，禁用重排序功能
+                        self.config.use_reranker = False
+                        return False
+                elif self.config.use_reranker:
+                    # 如果重排序器不存在但需要启用，创建新的重排序器
+                    self.reranker = CrossEncoderReranker(
+                        model_name=reranker_model_name,
+                        use_fp16=self.config.enable_amp_if_beneficial,
+                        backend=self.config.reranker_backend
+                    )
+                    if self.reranker.is_available():
+                        logger.info(f"重排序器初始化成功: {reranker_model_name}")
+                    else:
+                        logger.warning("重排序器初始化失败，将禁用重排序功能")
+                        self.config.use_reranker = False
+                        return False
+            
+            logger.info("重排序配置更新完成")
+            return True
+            
+        except Exception as e:
+            logger.error(f"更新重排序配置时发生错误: {e}")
+            return False
+    
+    def get_reranker_status(self) -> Dict[str, Any]:
+        """获取重排序器状态信息"""
+        status = {
+            'enabled': self.config.use_reranker,
+            'model_name': self.config.reranker_model_name,
+            'top_n': self.config.reranker_top_n,
+            'weight': self.config.reranker_weight,
+            'backend': self.config.reranker_backend,
+            'available': False,
+            'model_info': None
+        }
+        
+        if self.reranker:
+            status['available'] = self.reranker.is_available()
+            status['model_info'] = self.reranker.get_model_info()
+        
+        return status
 
 # --- 使用示例 ---
 if __name__ == "__main__":

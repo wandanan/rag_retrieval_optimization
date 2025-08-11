@@ -177,108 +177,125 @@ function validateV3ConfigConsistency() {
 
 // 配置管理
 function saveConfig() {
-  const config = {};
-  
-  // 只保存实际存在的元素
-  const configElements = {
-    [CONFIG_KEYS.PARENT_CHUNK_SIZE]: 'parent_chunk_size',
-    [CONFIG_KEYS.PARENT_OVERLAP]: 'parent_overlap',
-    [CONFIG_KEYS.SUB_CHUNK_SIZE]: 'sub_chunk_size',
-    [CONFIG_KEYS.SUB_OVERLAP]: 'sub_overlap',
-    [CONFIG_KEYS.BASE_URL]: 'base_url',
-    [CONFIG_KEYS.MODEL]: 'model',
-    [CONFIG_KEYS.API_KEY]: 'api_key',
-    [CONFIG_KEYS.PROMPT]: 'prompt'
-  };
-  
-  // 安全地获取元素值
-  Object.entries(configElements).forEach(([key, elementId]) => {
-    const element = document.getElementById(elementId);
-    if (element) {
-      config[key] = element.value;
+  try {
+    // 收集所有配置项
+    const config = {};
+    
+    // 文档切割配置
+    config[CONFIG_KEYS.PARENT_CHUNK_SIZE] = document.getElementById('parent_chunk_size').value;
+    config[CONFIG_KEYS.PARENT_OVERLAP] = document.getElementById('parent_overlap').value;
+    config[CONFIG_KEYS.SUB_CHUNK_SIZE] = document.getElementById('sub_chunk_size').value;
+    config[CONFIG_KEYS.SUB_OVERLAP] = document.getElementById('sub_overlap').value;
+    
+    // LLM配置
+    config[CONFIG_KEYS.BASE_URL] = document.getElementById('base_url').value;
+    config[CONFIG_KEYS.MODEL] = document.getElementById('model').value;
+    config[CONFIG_KEYS.API_KEY] = document.getElementById('api_key').value;
+    config[CONFIG_KEYS.PROMPT] = document.getElementById('prompt').value;
+    
+    // 保存到localStorage
+    Object.keys(config).forEach(key => {
+      localStorage.setItem(key, config[key]);
+    });
+    
+    // 保存历史记录
+    localStorage.setItem(CONFIG_KEYS.HISTORY, JSON.stringify(history));
+    
+    showOptimizationTip('配置已保存到本地存储', 'success');
+    
+    // 新增：如果索引已构建，立即更新后台重排序配置
+    if (isIndexBuilt) {
+      updateBackendRerankerConfig();
     }
-  });
-  
-  // 保存V3引擎配置
-  const v3ConfigElements = [
-    'encoder_backend', 'hf_model_name', 'embedding_dim',
-    'bm25_weight', 'colbert_weight', 'num_heads', 'context_influence',
-    'length_penalty_alpha', 'context_memory_decay', 'bm25_top_n', 'final_top_k',
-    'encode_batch_size', 'max_length', 'use_hybrid_search', 'use_multi_head',
-    'use_length_penalty', 'use_stateful_reranking', 'precompute_doc_tokens',
-    'enable_amp_if_beneficial', 'include_contexts',
-    // 新增重排序配置
-    'use_reranker', 'reranker_model_name', 'reranker_top_n', 'reranker_weight', 'reranker_backend'
-  ];
-  
-  v3ConfigElements.forEach(elementId => {
-    const element = document.getElementById(elementId);
-    if (element) {
-      if (element.type === 'checkbox') {
-        config[elementId] = element.checked;
-      } else {
-        config[elementId] = element.value;
-      }
-    }
-  });
-  
-  localStorage.setItem('rag_config', JSON.stringify(config));
-  console.log('配置已保存');
+    
+  } catch (error) {
+    console.error('保存配置时发生错误:', error);
+    showOptimizationTip('保存配置失败', 'error');
+  }
 }
 
 function loadConfig() {
   try {
-    const saved = localStorage.getItem('rag_config');
-    if (saved) {
-      const config = JSON.parse(saved);
-      
-      // 恢复配置到表单
-      Object.keys(config).forEach(key => {
-        const element = document.getElementById(key);
+    // 加载基本配置
+    Object.keys(CONFIG_KEYS).forEach(key => {
+      const savedValue = localStorage.getItem(key);
+      if (savedValue !== null) {
+        const element = document.getElementById(CONFIG_KEYS[key]);
         if (element) {
-          if (element.type === 'checkbox') {
-            element.checked = config[key];
-          } else {
-            element.value = config[key];
-          }
+          element.value = savedValue;
         }
-      });
-      
-      console.log('配置已恢复');
-    } else {
-      // 如果没有保存的配置，使用默认值
-      Object.keys(DEFAULT_CONFIG).forEach(key => {
-        const element = document.getElementById(key);
-        if (element) {
-          element.value = DEFAULT_CONFIG[key];
-        }
-      });
-      
-      // 同时设置V3引擎的默认配置
-      Object.keys(V3_DEFAULT_CONFIG).forEach(key => {
-        const element = document.getElementById(key);
-        if (element) {
-          if (element.type === 'checkbox') {
-            element.checked = V3_DEFAULT_CONFIG[key];
-          } else {
-            element.value = V3_DEFAULT_CONFIG[key];
-          }
-        }
-      });
-      
-      console.log('V3引擎默认配置已设置');
-    }
-  } catch (error) {
-    console.warn('恢复配置失败:', error);
-    // 出错时使用默认配置
-    Object.keys(DEFAULT_CONFIG).forEach(key => {
-      const element = document.getElementById(key);
-      if (element) {
-        element.value = DEFAULT_CONFIG[key];
       }
     });
     
-    // 同时设置V3引擎的默认配置
+    // 加载V3引擎配置
+    const savedV3Config = localStorage.getItem('rag_config');
+    if (savedV3Config) {
+      try {
+        const v3Config = JSON.parse(savedV3Config);
+        
+        // 应用V3配置到界面
+        Object.keys(v3Config).forEach(key => {
+          const element = document.getElementById(key);
+          if (element) {
+            if (element.type === 'checkbox') {
+              element.checked = Boolean(v3Config[key]);
+            } else {
+              element.value = v3Config[key];
+            }
+          }
+        });
+        
+        // 更新当前V3配置
+        currentV3Config = { ...v3Config };
+        
+        console.log('V3配置已加载:', currentV3Config);
+        
+        // 新增：如果索引已构建，同步配置到后台
+        if (isIndexBuilt) {
+          setTimeout(() => {
+            updateBackendRerankerConfig();
+          }, 1000); // 延迟1秒执行，确保界面完全加载
+        }
+        
+      } catch (parseError) {
+        console.error('解析V3配置失败:', parseError);
+      }
+    }
+    
+    // 加载历史记录
+    const savedHistory = localStorage.getItem(CONFIG_KEYS.HISTORY);
+    if (savedHistory) {
+      try {
+        history = JSON.parse(savedHistory);
+        renderHistory();
+      } catch (parseError) {
+        console.error('解析历史记录失败:', parseError);
+      }
+    }
+    
+    showOptimizationTip('配置已从本地存储加载', 'success');
+    
+  } catch (error) {
+    console.error('加载配置时发生错误:', error);
+    showOptimizationTip('加载配置失败', 'error');
+  }
+}
+
+function clearConfig() {
+  try {
+    // 清除基本配置
+    Object.keys(CONFIG_KEYS).forEach(key => {
+      localStorage.removeItem(key);
+      const element = document.getElementById(CONFIG_KEYS[key]);
+      if (element) {
+        element.value = DEFAULT_CONFIG[key] || '';
+      }
+    });
+    
+    // 清除V3引擎配置
+    localStorage.removeItem('rag_config');
+    
+    // 重置V3引擎配置到默认值
     Object.keys(V3_DEFAULT_CONFIG).forEach(key => {
       const element = document.getElementById(key);
       if (element) {
@@ -289,57 +306,28 @@ function loadConfig() {
         }
       }
     });
-  }
-}
-
-function clearConfig() {
-  if (confirm('确定要清除所有配置吗？这将重置所有设置到默认值。')) {
-    localStorage.removeItem('rag_config');
     
-    // 重置到默认值
-    Object.keys(DEFAULT_CONFIG).forEach(key => {
-      const element = document.getElementById(key);
-      if (element) {
-        element.value = DEFAULT_CONFIG[key];
-      }
-    });
+    // 更新当前V3配置
+    currentV3Config = { ...V3_DEFAULT_CONFIG };
     
-    // 重置V3引擎配置到默认值
-    const v3Defaults = {
-      'encoder_backend': 'hf',  // 固定为HF
-      'hf_model_name': 'BAAI/bge-small-zh-v1.5',   // HF模型名称
-      'embedding_dim': '512',
-      'bm25_weight': '1.0',
-      'colbert_weight': '1.5',
-      'num_heads': '8',
-      'context_influence': '0.3',
-      'length_penalty_alpha': '0.05',
-      'context_memory_decay': '0.8',
-      'bm25_top_n': '100',
-      'final_top_k': '10',
-      'encode_batch_size': '64',
-      'max_length': '256',
-      'use_hybrid_search': true,
-      'use_multi_head': true,
-      'use_length_penalty': true,
-      'use_stateful_reranking': true,
-      'precompute_doc_tokens': false,
-      'enable_amp_if_beneficial': true,
-      'include_contexts': false
-    };
+    // 清除历史记录
+    history = [];
+    localStorage.removeItem(CONFIG_KEYS.HISTORY);
+    renderHistory();
     
-    Object.entries(v3Defaults).forEach(([elementId, defaultValue]) => {
-      const element = document.getElementById(elementId);
-      if (element) {
-        if (element.type === 'checkbox') {
-          element.checked = defaultValue;
-        } else {
-          element.value = defaultValue;
-        }
-      }
-    });
+    console.log('配置已清除，使用默认值');
+    showOptimizationTip('配置已清除并重置为默认值', 'success');
     
-    alert('配置已清除');
+    // 新增：如果索引已构建，同步默认配置到后台
+    if (isIndexBuilt) {
+      setTimeout(() => {
+        updateBackendRerankerConfig();
+      }, 1000); // 延迟1秒执行，确保界面完全加载
+    }
+    
+  } catch (error) {
+    console.error('清除配置时发生错误:', error);
+    showOptimizationTip('清除配置失败', 'error');
   }
 }
 
@@ -453,6 +441,9 @@ async function uploadFile(e) {
 
   // 保存当前V3配置，供查询时使用
   currentV3Config = { ...v3Config };
+  
+  // 保存V3配置到本地存储
+  localStorage.setItem('rag_config', JSON.stringify(v3Config));
   
   // 显示上传配置信息
   console.log('上传文档使用的V3配置:', currentV3Config);
@@ -807,141 +798,67 @@ function applyPreset() {
   const presetSelect = document.getElementById('preset_config');
   const selectedPreset = presetSelect.value;
   
-  if (!selectedPreset) return; // 自定义配置，不做任何更改
+  if (!selectedPreset) {
+    showOptimizationTip('请选择一个预设配置', 'warning');
+    return;
+  }
   
-  const presets = {
-    balanced: {
-      encoder_backend: 'hf',
-      hf_model_name: 'BAAI/bge-small-zh-v1.5',
-      bm25_weight: 1.0,
-      colbert_weight: 1.5,
-      num_heads: 8,
-      context_influence: 0.3,
-      length_penalty_alpha: 0.05,
-      context_memory_decay: 0.8,
-      bm25_top_n: 100,
-      final_top_k: 10,
-      encode_batch_size: 64,
-      max_length: 256,
-      // 新增重排序配置
-      use_reranker: true,
-      reranker_model_name: "BAAI/bge-reranker-large",
-      reranker_top_n: 50,
-      reranker_weight: 1.5,
-      reranker_backend: "auto"
-    },
-    precision: {
-      encoder_backend: 'hf',
-      hf_model_name: 'BAAI/bge-small-zh-v1.5',
-      bm25_weight: 0.8,
-      colbert_weight: 2.0,
-      num_heads: 12,
-      context_influence: 0.5,
-      length_penalty_alpha: 0.1,
-      context_memory_decay: 0.9,
-      bm25_top_n: 150,
-      final_top_k: 15,
-      encode_batch_size: 32,
-      max_length: 384,
-      // 新增重排序配置
-      use_reranker: true,
-      reranker_model_name: "BAAI/bge-reranker-large",
-      reranker_top_n: 100,
-      reranker_weight: 2.0,
-      reranker_backend: "auto"
-    },
-    speed: {
-      encoder_backend: 'hf',
-      hf_model_name: 'BAAI/bge-small-zh-v1.5',
-      bm25_weight: 1.2,
-      colbert_weight: 1.0,
-      num_heads: 4,
-      context_influence: 0.2,
-      length_penalty_alpha: 0.02,
-      context_memory_decay: 0.7,
-      bm25_top_n: 50,
-      final_top_k: 5,
-      encode_batch_size: 128,
-      max_length: 192,
-      // 新增重排序配置
-      use_reranker: false,
-      reranker_model_name: "",
-      reranker_top_n: 30,
-      reranker_weight: 1.0,
-      reranker_backend: "auto"
-    },
-    conversational: {
-      encoder_backend: 'hf',
-      hf_model_name: 'BAAI/bge-small-zh-v1.5',
-      bm25_weight: 0.9,
-      colbert_weight: 1.8,
-      num_heads: 10,
-      context_influence: 0.4,
-      length_penalty_alpha: 0.03,
-      context_memory_decay: 0.85,
-      bm25_top_n: 120,
-      final_top_k: 12,
-      encode_batch_size: 48,
-      max_length: 320,
-      // 新增重排序配置
-      use_reranker: true,
-      reranker_model_name: "BAAI/bge-reranker-large",
-      reranker_top_n: 80,
-      reranker_weight: 1.8,
-      reranker_backend: "auto"
-    },
-    hf_optimized: {
-      encoder_backend: 'hf',
-      hf_model_name: 'BAAI/bge-small-zh-v1.5',
-      bm25_weight: 1.1,
-      colbert_weight: 1.6,
-      num_heads: 6,
-      context_influence: 0.25,
-      length_penalty_alpha: 0.04,
-      context_memory_decay: 0.75,
-      bm25_top_n: 80,
-      final_top_k: 8,
-      encode_batch_size: 96,
-      max_length: 256,
-      // 新增重排序配置
-      use_reranker: true,
-      reranker_model_name: "BAAI/bge-reranker-large",
-      reranker_top_n: 60,
-      reranker_weight: 1.6,
-      reranker_backend: "auto"
+  try {
+    // 获取预设配置
+    const presetConfig = getPresetConfig(selectedPreset);
+    if (!presetConfig) {
+      showOptimizationTip('预设配置不存在', 'error');
+      return;
     }
-  };
-  
-  const preset = presets[selectedPreset];
-  if (preset) {
-    Object.keys(preset).forEach(key => {
+    
+    // 应用预设配置到界面
+    Object.keys(presetConfig).forEach(key => {
       const element = document.getElementById(key);
       if (element) {
         if (element.type === 'checkbox') {
-          element.checked = preset[key];
+          element.checked = presetConfig[key];
         } else {
-          element.value = preset[key];
+          element.value = presetConfig[key];
         }
       }
     });
     
-    // 更新UI状态
-    toggleModelInputs();
+    // 更新当前V3配置
+    currentV3Config = { ...presetConfig };
     
-    // 保存配置
-    saveConfig();
+    // 保存配置到本地存储
+    localStorage.setItem('rag_config', JSON.stringify(presetConfig));
     
-    // 显示提示
-    const status = document.getElementById('batchTestStatus');
-    if (status) {
-      status.textContent = `✅ 已应用${presetSelect.options[presetSelect.selectedIndex].text}`;
-      status.className = 'status success';
+    // 显示成功提示
+    const presetName = getPresetDisplayName(selectedPreset);
+    showOptimizationTip(`预设配置"${presetName}"已应用并保存`, 'success');
+    
+    // 新增：如果索引已构建，同步预设配置到后台
+    if (isIndexBuilt) {
       setTimeout(() => {
-        status.textContent = '';
-        status.className = 'status';
-      }, 2000);
+        updateBackendRerankerConfig();
+      }, 1000); // 延迟1秒执行，确保界面完全加载
     }
+    
+    // 重置预设选择器
+    presetSelect.value = '';
+    
+  } catch (error) {
+    console.error('应用预设配置时发生错误:', error);
+    showOptimizationTip('应用预设配置失败', 'error');
   }
+}
+
+// 新增：获取预设配置的显示名称
+function getPresetDisplayName(presetKey) {
+  const presetNames = {
+    'balanced': '平衡模式',
+    'precision': '精确模式',
+    'speed': '快速模式',
+    'conversational': '对话模式',
+    'hf_optimized': 'HF优化模式'
+  };
+  return presetNames[presetKey] || presetKey;
 }
 
 // 验证并显示配置
@@ -1266,49 +1183,472 @@ Object.values(CONFIG_KEYS).forEach(key => {
   }
 });
 
-// 初始化
-document.addEventListener('DOMContentLoaded', () => {
-  // 重新获取批量测试相关元素（确保DOM已加载）
-  const batchTestElements = {
-    batchTestForm: document.getElementById('batchTestForm'),
-    testFileInput: document.getElementById('testFileInput'),
-    batchTestStatus: document.getElementById('batchTestStatus'),
-    testProgressCard: document.getElementById('testProgressCard'),
-    progressFill: document.getElementById('progressFill'),
-    progressText: document.getElementById('progressText'),
-    testSummary: document.getElementById('testSummary'),
-    resultsList: document.getElementById('resultsList'),
-    refreshResultsBtn: document.getElementById('refreshResultsBtn')
+// 重排序配置管理
+async function updateRerankerConfig() {
+  try {
+    if (!isIndexBuilt) {
+      showOptimizationTip('请先上传文档构建索引', 'warning');
+      return;
+    }
+    
+    // 获取重排序配置
+    const use_reranker = document.getElementById('use_reranker').checked;
+    const reranker_model_name = document.getElementById('reranker_model_name').value.trim();
+    const reranker_top_n = Number(document.getElementById('reranker_top_n').value);
+    const reranker_weight = Number(document.getElementById('reranker_weight').value);
+    const reranker_backend = document.getElementById('reranker_backend').value;
+    
+    // 验证配置
+    if (use_reranker && !reranker_model_name) {
+      showOptimizationTip('启用重排序时必须指定模型名称', 'error');
+      return;
+    }
+    
+    if (reranker_top_n < 1 || reranker_top_n > 200) {
+      showOptimizationTip('重排序候选数量必须在1-200之间', 'error');
+      return;
+    }
+    
+    if (reranker_weight < 0 || reranker_weight > 5) {
+      showOptimizationTip('重排序权重必须在0-5之间', 'error');
+      return;
+    }
+    
+    // 显示加载状态
+    const updateBtn = document.querySelector('.reranker-actions .btn-primary');
+    const originalText = updateBtn.textContent;
+    updateBtn.textContent = '🔄 更新中...';
+    updateBtn.disabled = true;
+    
+    // 发送更新请求
+    const response = await fetch('/api/v3/update_reranker', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        use_reranker,
+        reranker_model_name,
+        reranker_top_n,
+        reranker_weight,
+        reranker_backend
+      })
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      showOptimizationTip('重排序配置更新成功！', 'success');
+      
+      // 更新当前配置
+      if (currentV3Config) {
+        currentV3Config.use_reranker = use_reranker;
+        currentV3Config.reranker_model_name = reranker_model_name;
+        currentV3Config.reranker_top_n = reranker_top_n;
+        currentV3Config.reranker_weight = reranker_weight;
+        currentV3Config.reranker_backend = reranker_backend;
+      }
+      
+      // 刷新重排序状态显示
+      await refreshRerankerStatus();
+      
+      // 显示重排序状态区域
+      document.getElementById('rerankerStatus').style.display = 'block';
+      
+    } else {
+      showOptimizationTip(`重排序配置更新失败: ${result.message || '未知错误'}`, 'error');
+    }
+    
+  } catch (error) {
+    console.error('更新重排序配置时发生错误:', error);
+    showOptimizationTip(`更新重排序配置失败: ${error.message}`, 'error');
+  } finally {
+    // 恢复按钮状态
+    const updateBtn = document.querySelector('.reranker-actions .btn-primary');
+    updateBtn.textContent = '🔄 更新重排序配置';
+    updateBtn.disabled = false;
+  }
+}
+
+// 刷新重排序状态
+async function refreshRerankerStatus() {
+  try {
+    if (!isIndexBuilt) {
+      return;
+    }
+    
+    const response = await fetch('/api/v3/reranker_status');
+    const result = await response.json();
+    
+    if (result.success) {
+      displayRerankerStatus(result.reranker_status);
+    } else {
+      console.error('获取重排序状态失败:', result.message);
+    }
+    
+  } catch (error) {
+    console.error('刷新重排序状态时发生错误:', error);
+  }
+}
+
+// 显示重排序状态
+function displayRerankerStatus(status) {
+  const statusContent = document.getElementById('rerankerStatusContent');
+  
+  if (!status.enabled) {
+    statusContent.innerHTML = `
+      <div class="status-item disabled">
+        <span class="status-icon">❌</span>
+        <span class="status-text">重排序功能已禁用</span>
+      </div>
+    `;
+    return;
+  }
+  
+  const modelInfo = status.model_info || {};
+  const isAvailable = status.available;
+  
+  let statusHtml = `
+    <div class="status-grid">
+      <div class="status-item ${isAvailable ? 'success' : 'error'}">
+        <span class="status-icon">${isAvailable ? '✅' : '❌'}</span>
+        <span class="status-text">${isAvailable ? '重排序器可用' : '重排序器不可用'}</span>
+      </div>
+      
+      <div class="status-item">
+        <span class="status-label">模型名称:</span>
+        <span class="status-value">${status.model_name || 'N/A'}</span>
+      </div>
+      
+      <div class="status-item">
+        <span class="status-label">后端类型:</span>
+        <span class="status-value">${status.backend || 'N/A'}</span>
+      </div>
+      
+      <div class="status-item">
+        <span class="status-label">候选数量:</span>
+        <span class="status-value">${status.top_n || 'N/A'}</span>
+      </div>
+      
+      <div class="status-item">
+        <span class="status-label">权重系数:</span>
+        <span class="status-value">${status.weight || 'N/A'}</span>
+      </div>
+    </div>
+  `;
+  
+  if (modelInfo.device) {
+    statusHtml += `
+      <div class="status-item">
+        <span class="status-label">运行设备:</span>
+        <span class="status-value">${modelInfo.device}</span>
+      </div>
+    `;
+  }
+  
+  if (modelInfo.use_fp16 !== undefined) {
+    statusHtml += `
+      <div class="status-item">
+        <span class="status-label">FP16优化:</span>
+        <span class="status-value">${modelInfo.use_fp16 ? '启用' : '禁用'}</span>
+      </div>
+    `;
+  }
+  
+  statusContent.innerHTML = statusHtml;
+}
+
+// 测试重排序器
+async function testReranker() {
+  try {
+    if (!isIndexBuilt) {
+      showOptimizationTip('请先上传文档构建索引', 'error');
+      return;
+    }
+    
+    showOptimizationTip('正在测试重排序器...', 'info');
+    
+    // 刷新状态以获取最新信息
+    await refreshRerankerStatus();
+    
+    // 显示重排序状态区域
+    document.getElementById('rerankerStatus').style.display = 'block';
+    
+    showOptimizationTip('重排序器测试完成，请查看状态信息', 'success');
+    
+  } catch (error) {
+    console.error('测试重排序器时发生错误:', error);
+    showOptimizationTip(`测试重排序器失败: ${error.message}`, 'error');
+  }
+}
+
+// 重排序配置变化处理
+function handleRerankerConfigChange() {
+  const useReranker = document.getElementById('use_reranker');
+  const rerankerConfigs = document.querySelectorAll('.reranker-config input, .reranker-config select');
+  
+  // 根据主开关状态启用/禁用其他配置
+  rerankerConfigs.forEach(config => {
+    if (config !== useReranker) {
+      config.disabled = !useReranker.checked;
+    }
+  });
+  
+  // 如果启用重排序，显示状态区域
+  if (useReranker.checked) {
+    document.getElementById('rerankerStatus').style.display = 'block';
+    // 延迟刷新状态，避免频繁请求
+    setTimeout(() => refreshRerankerStatus(), 1000);
+  } else {
+    document.getElementById('rerankerStatus').style.display = 'none';
+  }
+}
+
+// 新增：更新后台重排序配置的函数
+async function updateBackendRerankerConfig() {
+  try {
+    // 获取当前重排序配置
+    const use_reranker = document.getElementById('use_reranker').checked;
+    const reranker_model_name = document.getElementById('reranker_model_name').value.trim();
+    const reranker_top_n = Number(document.getElementById('reranker_top_n').value);
+    const reranker_weight = Number(document.getElementById('reranker_weight').value);
+    const reranker_backend = document.getElementById('reranker_backend').value;
+    
+    // 验证配置
+    if (use_reranker && !reranker_model_name) {
+      console.warn('启用重排序但未指定模型名称，跳过后台更新');
+      return;
+    }
+    
+    if (reranker_top_n < 1 || reranker_top_n > 200) {
+      console.warn('重排序候选数量无效，跳过后台更新');
+      return;
+    }
+    
+    if (reranker_weight < 0 || reranker_weight > 5) {
+      console.warn('重排序权重无效，跳过后台更新');
+      return;
+    }
+    
+    console.log('正在更新后台重排序配置...');
+    
+    // 发送更新请求到后台
+    const response = await fetch('/api/v3/update_reranker', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        use_reranker,
+        reranker_model_name,
+        reranker_top_n,
+        reranker_weight,
+        reranker_backend
+      })
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      console.log('后台重排序配置更新成功:', result.reranker_status);
+      
+      // 更新当前V3配置
+      if (currentV3Config) {
+        currentV3Config.use_reranker = use_reranker;
+        currentV3Config.reranker_model_name = reranker_model_name;
+        currentV3Config.reranker_top_n = reranker_top_n;
+        currentV3Config.reranker_weight = reranker_weight;
+        currentV3Config.reranker_backend = reranker_backend;
+      }
+      
+      // 刷新重排序状态显示
+      await refreshRerankerStatus();
+      
+      // 显示成功提示
+      showOptimizationTip('配置已保存并同步到后台！', 'success');
+      
+    } else {
+      console.error('后台重排序配置更新失败:', result.message);
+      showOptimizationTip(`后台配置更新失败: ${result.message}`, 'warning');
+    }
+    
+  } catch (error) {
+    console.error('更新后台重排序配置时发生错误:', error);
+    showOptimizationTip(`后台配置更新失败: ${error.message}`, 'warning');
+  }
+}
+
+// 新增：获取预设配置的函数
+function getPresetConfig(presetKey) {
+  const presets = {
+    balanced: {
+      encoder_backend: 'hf',
+      hf_model_name: 'BAAI/bge-small-zh-v1.5',
+      bm25_weight: 1.0,
+      colbert_weight: 1.5,
+      num_heads: 8,
+      context_influence: 0.3,
+      length_penalty_alpha: 0.05,
+      context_memory_decay: 0.8,
+      bm25_top_n: 100,
+      final_top_k: 10,
+      encode_batch_size: 64,
+      max_length: 256,
+      use_hybrid_search: true,
+      use_multi_head: true,
+      use_length_penalty: true,
+      use_stateful_reranking: true,
+      precompute_doc_tokens: false,
+      enable_amp_if_beneficial: true,
+      // 重排序配置
+      use_reranker: true,
+      reranker_model_name: "BAAI/bge-reranker-large",
+      reranker_top_n: 50,
+      reranker_weight: 1.5,
+      reranker_backend: "auto"
+    },
+    precision: {
+      encoder_backend: 'hf',
+      hf_model_name: 'BAAI/bge-small-zh-v1.5',
+      bm25_weight: 0.8,
+      colbert_weight: 2.0,
+      num_heads: 12,
+      context_influence: 0.5,
+      length_penalty_alpha: 0.1,
+      context_memory_decay: 0.9,
+      bm25_top_n: 150,
+      final_top_k: 15,
+      encode_batch_size: 32,
+      max_length: 384,
+      use_hybrid_search: true,
+      use_multi_head: true,
+      use_length_penalty: true,
+      use_stateful_reranking: true,
+      precompute_doc_tokens: false,
+      enable_amp_if_beneficial: true,
+      // 重排序配置
+      use_reranker: true,
+      reranker_model_name: "BAAI/bge-reranker-large",
+      reranker_top_n: 100,
+      reranker_weight: 2.0,
+      reranker_backend: "auto"
+    },
+    speed: {
+      encoder_backend: 'hf',
+      hf_model_name: 'BAAI/bge-small-zh-v1.5',
+      bm25_weight: 1.2,
+      colbert_weight: 1.0,
+      num_heads: 4,
+      context_influence: 0.2,
+      length_penalty_alpha: 0.02,
+      context_memory_decay: 0.7,
+      bm25_top_n: 50,
+      final_top_k: 5,
+      encode_batch_size: 128,
+      max_length: 192,
+      use_hybrid_search: true,
+      use_multi_head: false,
+      use_length_penalty: false,
+      use_stateful_reranking: false,
+      precompute_doc_tokens: true,
+      enable_amp_if_beneficial: true,
+      // 重排序配置
+      use_reranker: false,
+      reranker_model_name: "",
+      reranker_top_n: 30,
+      reranker_weight: 1.0,
+      reranker_backend: "auto"
+    },
+    conversational: {
+      encoder_backend: 'hf',
+      hf_model_name: 'BAAI/bge-small-zh-v1.5',
+      bm25_weight: 0.9,
+      colbert_weight: 1.8,
+      num_heads: 10,
+      context_influence: 0.4,
+      length_penalty_alpha: 0.03,
+      context_memory_decay: 0.85,
+      bm25_top_n: 120,
+      final_top_k: 12,
+      encode_batch_size: 48,
+      max_length: 320,
+      use_hybrid_search: true,
+      use_multi_head: true,
+      use_length_penalty: true,
+      use_stateful_reranking: true,
+      precompute_doc_tokens: false,
+      enable_amp_if_beneficial: true,
+      // 重排序配置
+      use_reranker: true,
+      reranker_model_name: "BAAI/bge-reranker-large",
+      reranker_top_n: 80,
+      reranker_weight: 1.8,
+      reranker_backend: "auto"
+    },
+    hf_optimized: {
+      encoder_backend: 'hf',
+      hf_model_name: 'BAAI/bge-small-zh-v1.5',
+      bm25_weight: 1.1,
+      colbert_weight: 1.6,
+      num_heads: 6,
+      context_influence: 0.25,
+      length_penalty_alpha: 0.04,
+      context_memory_decay: 0.75,
+      bm25_top_n: 80,
+      final_top_k: 8,
+      encode_batch_size: 96,
+      max_length: 256,
+      use_hybrid_search: true,
+      use_multi_head: true,
+      use_length_penalty: true,
+      use_stateful_reranking: true,
+      precompute_doc_tokens: false,
+      enable_amp_if_beneficial: true,
+      // 重排序配置
+      use_reranker: true,
+      reranker_model_name: "BAAI/bge-reranker-large",
+      reranker_top_n: 60,
+      reranker_weight: 1.6,
+      reranker_backend: "auto"
+    }
   };
+  
+  return presets[presetKey] || null;
+}
 
-  // 批量测试事件监听器
-  if (batchTestElements.batchTestForm) {
-    batchTestElements.batchTestForm.addEventListener('submit', handleBatchTest);
-  }
-
-  if (batchTestElements.refreshResultsBtn) {
-    batchTestElements.refreshResultsBtn.addEventListener('click', refreshResultsList);
-  }
-
-  // 加载保存的配置
+// 初始化
+document.addEventListener('DOMContentLoaded', function() {
+  // 加载配置和历史
   loadConfig();
   loadHistory();
   
-  // 检查服务状态
-  fetch('/api/health')
-    .then(res => res.json())
-    .then(data => {
-      if (data.index_built) {
-        isIndexBuilt = true;
-        updateStatus(elements.v3Status, '就绪', 'success');
-        elements.uploadStatus.textContent = '✅ 索引已就绪';
-        elements.uploadStatus.className = 'status success';
-      }
-    })
-    .catch(() => {
-      updateStatus(elements.v3Status, '未连接', 'error');
-    });
+  // 绑定事件
+  elements.uploadForm.addEventListener('submit', uploadFile);
+  elements.askBtn.addEventListener('click', askQuestion);
+  elements.clearHistoryBtn.addEventListener('click', clearHistory);
+  elements.clearConfigBtn.addEventListener('click', clearConfig);
+  elements.refreshResultsBtn.addEventListener('click', refreshResultsList);
+  elements.batchTestForm.addEventListener('submit', handleBatchTest);
   
-  // 初始加载结果列表
+  // 绑定重排序配置变化事件
+  document.getElementById('use_reranker').addEventListener('change', handleRerankerConfigChange);
+  document.getElementById('reranker_model_name').addEventListener('input', handleRerankerConfigChange);
+  document.getElementById('reranker_top_n').addEventListener('input', handleRerankerConfigChange);
+  document.getElementById('reranker_weight').addEventListener('input', handleRerankerConfigChange);
+  document.getElementById('reranker_backend').addEventListener('change', handleRerankerConfigChange);
+  
+  // 绑定键盘事件
+  elements.question.addEventListener('keypress', handleKeyPress);
+  
+  // 绑定配置变化事件
+  document.addEventListener('change', handleConfigChange);
+  
+  // 初始化重排序配置状态
+  handleRerankerConfigChange();
+  
+  // 加载结果列表
   loadResultsList();
+  
+  // 显示优化提示
+  showOptimizationTip('V3 RAG引擎已就绪，支持动态重排序配置！', 'success');
 }); 

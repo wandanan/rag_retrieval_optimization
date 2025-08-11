@@ -186,31 +186,27 @@
             <!-- 新增: 重排序配置 -->
             <div class="reranker-config">
               <h4>🚀 交叉编码器重排序</h4>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>
-                    <input type="checkbox" id="use_reranker" checked />
-                    启用交叉编码器重排序
-                  </label>
-                </div>
-                <div class="form-group">
-                  <label>
-                    <input type="checkbox" id="enable_amp_if_beneficial" checked />
-                    启用AMP优化
-                  </label>
-                </div>
+              
+              <!-- 重排序主开关 -->
+              <div class="form-group">
+                <label>
+                  <input type="checkbox" id="use_reranker" checked />
+                  启用交叉编码器重排序
+                </label>
+                <small class="form-hint">启用后将使用交叉编码器对检索结果进行精确重排序</small>
               </div>
               
-              <!-- 重排序详细配置 -->
+              <!-- 重排序模型配置 -->
               <div class="form-row">
                 <div class="form-group">
                   <label>重排序模型：</label>
                   <input type="text" id="reranker_model_name" value="BAAI/bge-reranker-large" placeholder="重排序模型名称，例如：BAAI/bge-reranker-large" />
-                  <small class="form-hint">默认使用在线模型 BAAI/bge-reranker-large</small>
+                  <small class="form-hint">支持HuggingFace模型，将自动下载并缓存到本地</small>
                 </div>
                 <div class="form-group">
                   <label>重排序候选数量：</label>
                   <input type="number" id="reranker_top_n" value="50" min="10" max="200" />
+                  <small class="form-hint">选择前N个候选文档进行重排序</small>
                 </div>
               </div>
               
@@ -218,6 +214,7 @@
                 <div class="form-group">
                   <label>重排序权重：</label>
                   <input type="number" id="reranker_weight" value="1.5" step="0.1" min="0" max="5" />
+                  <small class="form-hint">重排序分数在最终融合中的权重</small>
                 </div>
                 <div class="form-group">
                   <label>重排序后端：</label>
@@ -227,7 +224,29 @@
                     <option value="transformers">HuggingFace Transformers</option>
                     <option value="onnx">ONNX Runtime</option>
                   </select>
+                  <small class="form-hint">自动选择将按优先级尝试不同后端</small>
                 </div>
+              </div>
+              
+              <!-- 重排序状态显示 -->
+              <div class="reranker-status" id="rerankerStatus" style="display: none;">
+                <div class="status-header">
+                  <h5>📊 重排序器状态</h5>
+                  <button type="button" onclick="refreshRerankerStatus()" class="btn btn-sm btn-secondary">🔄 刷新状态</button>
+                </div>
+                <div class="status-content" id="rerankerStatusContent">
+                  <div class="loading">加载中...</div>
+                </div>
+              </div>
+              
+              <!-- 重排序操作按钮 -->
+              <div class="reranker-actions">
+                <button type="button" onclick="updateRerankerConfig()" class="btn btn-primary">
+                  🔄 更新重排序配置
+                </button>
+                <button type="button" onclick="testReranker()" class="btn btn-secondary">
+                  🧪 测试重排序器
+                </button>
               </div>
             </div>
             
